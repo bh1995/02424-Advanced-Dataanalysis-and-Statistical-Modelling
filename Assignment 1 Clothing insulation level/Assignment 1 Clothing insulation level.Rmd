@@ -8,13 +8,17 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 # Load necesarry libraries
-setwd("C:/Users/bjorn/OneDrive/Dokument/University/DTU/02424 Advanced Dataanalysis and Statistical Modelling/Assignment 1")
+library(rstudioapi)
 library(dplyr)
 library(ggplot2)
 #library(corrplot)
 
+# Set correct working directory
+path = getActiveProject()
+setwd(path)
 ```
 
 
@@ -65,6 +69,9 @@ boxplot(clo~sex, data=data)
 
 ```{r, echo=FALSE}
 # divide data into test and train?
+# Sort data by sex
+data_f = subset(data, sex=="female")
+data_m = subset(data, sex=="male")
 
 glm_model1 = glm(clo~., data=data)
 summary(glm_model1)
@@ -73,21 +80,16 @@ glm_pred1_rounded = round(glm_pred1, 2)
 
 # Create weights for male and female  
 variance = tapply(residuals(glm_model1), data$sex, var) # calculate residual variance between sexes
- # calculate weights using the residual variance 
-wts = c()
-for(i in data){
-  if(data$sex=="female"){
-    wts[i] = 1/variance[1]
-  }
-wts[i] 
-}
+# calculate weights by dividing outdoor temp. by residual variance 
+wts_f = data_f$tOut/variance[1]
+wts_m = data_m$tOut/variance[2]
+wts = c(wts_f, wts_m)
 
-w = 1/(sd(data$tInOp)^2)
-glm_model2 = glm(clo~., data=data, weights=1/SD^2)
+glm_model2 = glm(clo~., data=data1, weights=wts)
 glm_pred2 = predict(glm_model2, data=data)
 
-plot(clo~tInOp, data=data, col=sex, main="plotting clothing level as a function of inside temp.", xlab="Inside temp.", ylab="clothing level")
+plot(clo~tInOp, data=data, col=sex, main="plotting clothing level as a function of temp. outside", xlab="Outside temp.", ylab="clothing level")
 points(glm_pred1~data$tOut, col="green")
 points(glm_pred2~data$tOut, col="blue")
-legend("topright", pch = 1, col=c("red", "black", "green", "blue"), legend=c("Male", "Female", "predicted"))
+legend("topright", pch = 1, col=c("red", "black", "green", "blue"), legend=c("Male", "Female", "pred", "pred w/wts"))
 ```
