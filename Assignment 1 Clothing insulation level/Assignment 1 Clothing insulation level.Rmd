@@ -1,0 +1,93 @@
+---
+title: '02424 Assignment 1: Clothing insulation level'
+author: "Bjorn Hansen"
+date: "2/7/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Load necesarry libraries
+setwd("C:/Users/bjorn/OneDrive/Dokument/University/DTU/02424 Advanced Dataanalysis and Statistical Modelling/Assignment 1")
+library(dplyr)
+library(ggplot2)
+#library(corrplot)
+
+```
+
+
+## Problem A: General linear model
+###### 1.
+We have a total number of 136 entries in our dataset, with one target being clothing level, and three features being outdoor tempreture, indoor tempreture, and sex. 
+
+As can be seen from the plots below, the level of clothing increases with the lower temperatures both for indoor and outdoor. The data points for woman are much more spread out than for men, this is clarified by the boxplot which shows that the clothing level interval is much larger for woman than for men.  
+
+```{r, echo=FALSE}
+data = read.csv("clothingSum.csv")
+data = select(data, -c(subjId, day))
+# data$clo = as.factor(data$clo)
+# data$tOut = as.factor(data$tOut)
+# data$tInOp = as.factor(data$tInOp)
+summary(data)
+
+plot(clo~tInOp, data=data, col=sex, main="plotting clothing level as a function of inside temp.", xlab="Inside temp.", ylab="clothing level")
+legend("topright", pch = 1, col=c("red", "black"), legend=c("Male", "Female"))
+plot(clo~tOut, data=data, col=sex, main="plotting clothing level as a function of outside temp.", xlab="Outside temp.", ylab="clothing level")
+legend("topright", pch = 1, col=c("red", "black"), legend=c("Male", "Female"))
+
+boxplot(clo~sex, data=data)
+
+# Check correlation
+
+# Box plot to see difference between sexes
+# ggplot(data=data, aes(x=as.factor(tOut),y=clo, fill=as.factor(tOut))) + 
+#   geom_boxplot()+
+#   scale_fill_brewer(palette="Green") + 
+#   geom_jitter(shape=16, position=position_jitter(0.2))+
+#   labs(title = 'Difference between males and females?',
+#        y='clothing',x='temp. outside')+
+#   facet_wrap(~sex, nrow = 1)
+
+# See if the 
+
+#plt()
+#plot(clo~, data=data, type="l", col="red", main="Time Series Plot")
+#par(new=TRUE)
+#plot(Influenza~Time, data=data, type="l", col="blue", axes=FALSE, xlab="", ylab="")
+#axis(side = 4,col = "blue", col.axis="blue")
+#mtext("Influenza",side = 4,line = 3,col="blue")
+```
+
+###### 2.
+
+
+```{r, echo=FALSE}
+# divide data into test and train?
+
+glm_model1 = glm(clo~., data=data)
+summary(glm_model1)
+glm_pred1 = predict(glm_model1, data=data)
+glm_pred1_rounded = round(glm_pred1, 2)
+
+# Create weights for male and female  
+variance = tapply(residuals(glm_model1), data$sex, var) # calculate residual variance between sexes
+ # calculate weights using the residual variance 
+wts = c()
+for(i in data){
+  if(data$sex=="female"){
+    wts[i] = 1/variance[1]
+  }
+wts[i] 
+}
+
+w = 1/(sd(data$tInOp)^2)
+glm_model2 = glm(clo~., data=data, weights=1/SD^2)
+glm_pred2 = predict(glm_model2, data=data)
+
+plot(clo~tInOp, data=data, col=sex, main="plotting clothing level as a function of inside temp.", xlab="Inside temp.", ylab="clothing level")
+points(glm_pred1~data$tOut, col="green")
+points(glm_pred2~data$tOut, col="blue")
+legend("topright", pch = 1, col=c("red", "black", "green", "blue"), legend=c("Male", "Female", "predicted"))
+```
