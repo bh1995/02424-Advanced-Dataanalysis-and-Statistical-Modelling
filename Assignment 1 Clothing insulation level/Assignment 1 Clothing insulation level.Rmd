@@ -70,13 +70,13 @@ boxplot(clo~sex, data=data)
 ```{r, echo=FALSE}
 # divide data into test and train?
 # Sort data by sex
-data_f = subset(data, sex=="female")
+data_f = subset(data, sex=="female") # data[data$sex=="female",]
 data_m = subset(data, sex=="male")
 
 glm_model1 = glm(clo~., data=data)
 summary(glm_model1)
 glm_pred1 = predict(glm_model1, data=data)
-glm_pred1_rounded = round(glm_pred1, 2)
+#glm_pred1_rounded = round(glm_pred1, 2)
 
 # Create weights for male and female  
 variance = tapply(residuals(glm_model1), data$sex, var) # calculate residual variance between sexes
@@ -85,7 +85,7 @@ wts_f = data_f$tOut/variance[1]
 wts_m = data_m$tOut/variance[2]
 wts = c(wts_f, wts_m)
 
-glm_model2 = glm(clo~., data=data1, weights=wts)
+glm_model2 = glm(clo~ tOut, data=data1, weights=wts)
 glm_pred2 = predict(glm_model2, data=data)
 
 plot(clo~tInOp, data=data, col=sex, main="plotting clothing level as a function of temp. outside", xlab="Outside temp.", ylab="clothing level")

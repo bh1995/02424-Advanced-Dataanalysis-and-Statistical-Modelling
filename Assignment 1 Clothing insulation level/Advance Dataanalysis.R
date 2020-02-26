@@ -1,4 +1,5 @@
 ################################
+library(dplyr)
 ## Read data
 setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/Assignments")
 ## Read the .txt file holding the data
@@ -102,6 +103,14 @@ abline(line(df$Q, df$fit), col='green', lty="dashed")
 abline(line(df$Q, df$lwr), col='black')
 abline(line(df$Q, df$upr), col='black')
 
+# PCA
+data = select(HE, -c(subjId, day, sex))
+prc = prcomp(~clo+tOut+tInOp,data=data)
+summary(prc)
+plot(prc) # Shows that the first principal component is of the most importance with 93.5% of the variance
+# described by it. 
+
+
 ##################################################################################################################################
 ## Generalized linear model
 glm_clo <- glm(clo ~ tOut + tInOp, data = HE)
@@ -126,4 +135,27 @@ summary(glm_clo_fem)
 glm_clo_male <- glm(clo ~ tOut + tInOp, data = male)
 summary(glm_clo_male)
 
+
+# Make linear model to predict clothing level for male and female. The model we are trying to predict looks like: 
+# Y_hat = X*beta_hat + error, where Y_hat is the level of clothing, X is a matrix compsed of  the linaer dependent
+# variables, beta_hat is a vector of coefficients. 
+x1 = matrix(1, dim(HE)[1], 1) # intercept
+x2 = c(fem$tOut, male$tOut)
+x3 = c(fem$tInOp, male$tInOp)
+x4 = c(matrix(0, dim(fem)[1], 1), matrix(1, dim(male)[1], 1)) # 0 for female and 1 for male
+X = cbind(x1, x2, x3, x4) # Combine to make X matrix
+y = c(fem$clo, male$clo) # Target vector (clothing level)
+
+beta_hat = solve(t(X)%*%X)%*%t(X)%*%y
+
+# Estimate a clothing level for a male while indoor temp. = 26.29423 and outdoor temp. = 28.83776.
+# i.e. (1, 26.29423, 28.83776). This is the same data as for point data point 133. 
+Y_hat1 = rbind(X, c(1, 26.29423, 28.83776, 1))%*%beta_hat 
+Y_hat1[137]
+Y_hat[133]
+# Estimate a clothing level for a female while indoor temp. = 20.21969 and outdoor temp. = 27.01763.
+# i.e. (1, 20.21969, 27.01763, 0). This is the same data as for point data point 4. 
+Y_hat2 = rbind(X, c(1, 20.21969, 27.01763, 0))%*%beta_hat 
+Y_hat2[137]
+Y_hat[4]
 
