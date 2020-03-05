@@ -105,11 +105,14 @@ abline(line(df$Q, df$upr), col='black')
 
 # PCA
 data = select(HE, -c(subjId, day, sex))
-prc = prcomp(~clo+tOut+tInOp,data=data)
+prc = prcomp(~clo+tOut+tInOp,data=data, scale=TRUE)
 summary(prc)
-plot(prc) # Shows that the first principal component is of the most importance with 93.5% of the variance
-# described by it. 
+plot(prc) 
 
+prc2 = prcomp(~clo+tOut+tInOp+day+subjId, data=HE, scale=TRUE)
+plot(prc2)
+summary(prc2)
+prc2
 
 ##################################################################################################################################
 ## Generalized linear model
