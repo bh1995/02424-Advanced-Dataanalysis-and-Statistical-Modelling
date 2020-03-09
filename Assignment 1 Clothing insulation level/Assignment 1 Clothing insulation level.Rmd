@@ -18,7 +18,8 @@ library(ggplot2)
 
 # Set correct working directory
 path = getActiveProject()
-setwd(path)
+setwd("C:/Users/Bjorn/OneDrive/Dokument/University/DTU/02424 Advanced Dataanalysis and Statistical Modelling/labs/02424-Advanced-Dataanalysis-and-Statistical-Modelling")
+setwd(getwd())
 ```
 
 
@@ -29,7 +30,7 @@ We have a total number of 136 entries in our dataset, with one target being clot
 As can be seen from the plots below, the level of clothing increases with the lower temperatures both for indoor and outdoor. The data points for woman are much more spread out than for men, this is clarified by the boxplot which shows that the clothing level interval is much larger for woman than for men.  
 
 ```{r, echo=FALSE}
-data = read.csv("clothingSum.csv")
+data = read.table("clothingSum.csv")
 data = select(data, -c(subjId, day))
 # data$clo = as.factor(data$clo)
 # data$tOut = as.factor(data$tOut)
@@ -92,4 +93,6 @@ plot(clo~tInOp, data=data, col=sex, main="plotting clothing level as a function 
 points(glm_pred1~data$tOut, col="green")
 points(glm_pred2~data$tOut, col="blue")
 legend("topright", pch = 1, col=c("red", "black", "green", "blue"), legend=c("Male", "Female", "pred", "pred w/wts"))
+
+
 ```

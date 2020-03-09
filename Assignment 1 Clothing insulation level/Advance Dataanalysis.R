@@ -1,7 +1,8 @@
 ################################
 library(dplyr)
 ## Read data
-setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/Assignments")
+# setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/Assignments")
+setwd("C:/Users/Bjorn/OneDrive/Dokument/University/DTU/02424 Advanced Dataanalysis and Statistical Modelling/labs/02424-Advanced-Dataanalysis-and-Statistical-Modelling")
 ## Read the .txt file holding the data
 HE <- read.table("clothingSum.csv", sep=",", header=TRUE, as.is=TRUE)
 fem <- subset(HE, (sex == 'female'))
@@ -161,4 +162,46 @@ Y_hat[133]
 Y_hat2 = rbind(X, c(1, 20.21969, 27.01763, 0))%*%beta_hat 
 Y_hat2[137]
 Y_hat[4]
+
+### Find optimal variance matrix
+# Sort data by sex
+data_f = subset(HE, sex=="female") # data[data$sex=="female",]
+data_f2 = select(data_f, -c(sex))
+data_m = subset(HE, sex=="male")
+data_m2 = select(data_m, -c(sex))
+data2 = rbind(data_m2, data_f2)
+glm_model1 = glm(clo~., data=data2)
+summary(glm_model1)
+glm_pred1 = predict(glm_model1, data=data)
+#glm_pred1_rounded = round(glm_pred1, 2)
+
+# Create weights for male and female  
+variance = tapply(residuals(glm_model1), data$sex, var) # calculate residual variance between sexes
+# calculate weights by dividing outdoor temp. by residual variance 
+# wts_f = data_f$tOut/variance[1]
+# wts_m = data_m$tOut/variance[2]
+# Add weights arbitrarily to see how the residuls of the model responds.
+wts_m2 = matrix(0,nrow=dim(data_m2[1]))
+wts_f2 = matrix(0.5,nrow=dim(data_f2)[1])
+wts = c(wts_m2, wts_f2)
+wts
+
+
+glm_model2 = glm(clo~., data=data2, weights=wts)
+glm_model2$deviance
+summary(glm_model2)
+glm_pred2 = predict(glm_model2, data=data)
+
+wts_ = seq(0.1,1,0.01) # Different weights to be tested
+dev = c()
+for(i in wts_){
+  wts_m2 = matrix(1,ncol=dim(data_m2[1]))
+  wts_f2 = matrix(i,ncol=dim(data_f2)[1]) # Put the weights on female
+  wts = c(wts_m2, wts_f2)
+  glm_model2 = glm(clo~., data=data2, weights=wts)
+  dev = c(dev, glm_model2$deviance)
+}
+dev
+
+
 
