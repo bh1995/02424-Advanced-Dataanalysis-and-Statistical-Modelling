@@ -1,5 +1,6 @@
 ################################
 library(dplyr)
+library(ggplot2)
 ## Read data
 # setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/Assignments")
 setwd("C:/Users/Bjorn/OneDrive/Dokument/University/DTU/02424 Advanced Dataanalysis and Statistical Modelling/labs/02424-Advanced-Dataanalysis-and-Statistical-Modelling")
@@ -181,8 +182,8 @@ variance = tapply(residuals(glm_model1), data$sex, var) # calculate residual var
 # wts_f = data_f$tOut/variance[1]
 # wts_m = data_m$tOut/variance[2]
 # Add weights arbitrarily to see how the residuls of the model responds.
-wts_m2 = matrix(0,nrow=dim(data_m2[1]))
-wts_f2 = matrix(0.5,nrow=dim(data_f2)[1])
+wts_m2 = matrix(1,nrow=dim(data_m2[1]))
+wts_f2 = matrix(0.28,nrow=dim(data_f2)[1])
 wts = c(wts_m2, wts_f2)
 wts
 
@@ -193,15 +194,32 @@ summary(glm_model2)
 glm_pred2 = predict(glm_model2, data=data)
 
 wts_ = seq(0.1,1,0.01) # Different weights to be tested
-dev = c()
+llh = c()
 for(i in wts_){
   wts_m2 = matrix(1,ncol=dim(data_m2[1]))
   wts_f2 = matrix(i,ncol=dim(data_f2)[1]) # Put the weights on female
   wts = c(wts_m2, wts_f2)
   glm_model2 = glm(clo~., data=data2, weights=wts)
-  dev = c(dev, glm_model2$deviance)
+  llh_ = logLik(glm_model2)
+  llh = c(llh, llh_) # Add every new llh value to vector
 }
-dev
+max(llh)
+which.max(llh)
+wts_[which.max(llh)]
+plot(wts_, llh, xlab="Weight coefficient", ylab="Log Likelihood")
 
+# View model with new weights
+wts_m2 = matrix(1,nrow=dim(data_m2[1]))
+wts_f2 = matrix(0.28,nrow=dim(data_f2)[1])
+wts = c(wts_m2, wts_f2)
+glm_model2 = glm(clo~., data=data2, weights=wts)
+summary(glm_model2)
+glm_pred2 = predict(glm_model2, interval = "prediction")
 
+# Plot new model
+data2.2= data.frame(tOut=data2$tOut, clo=glm_pred2)
+p_model2 = ggplot(data2.2, aes(tOut, clo)) + geom_point() + stat_smooth(method = glm) +
+  labs(y="Predicted clothing level with weights", x = "Temp. Outside")
+p_model2
+p_model2 + geom_line(aes(y = lwr), color = "red", linetype = "dashed") + geom_line(aes(y = upr), color = "red", linetype = "dashed")
 
