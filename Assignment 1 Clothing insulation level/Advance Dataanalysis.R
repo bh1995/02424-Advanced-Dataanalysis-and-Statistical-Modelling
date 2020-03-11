@@ -223,3 +223,18 @@ p_model2 = ggplot(data2.2, aes(tOut, clo)) + geom_point() + stat_smooth(method =
 p_model2
 p_model2 + geom_line(aes(y = lwr), color = "red", linetype = "dashed") + geom_line(aes(y = upr), color = "red", linetype = "dashed")
 
+data_f = subset(HE, sex=="female") # data[data$sex=="female",]
+data_m = subset(HE, sex=="male") # data[data$sex=="female",]
+data = rbind(data_f, data_m)
+rs_subj_tOut_ml = lmer(clo ~ 1 + sex + tInOp + sex:tInOp + (1 | subjId), REML = FALSE, data = data)
+
+#library(effects)
+p <- ggplot(data, aes(x = tOut, y = clo, colour = sex)) +
+  geom_point(size=3) +
+  geom_line(aes(y = predict(rs_subj_tOut_ml)),size=1) 
+par(mfrow=c(2,2))
+#confint(rs_subj_tOut_ml)
+plot(effect(c("sex"), rs_subj_t?Out_ml), ylab="sex")
+plot(p)
+
+
