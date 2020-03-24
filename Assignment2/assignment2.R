@@ -66,9 +66,39 @@ summary(fit3)
 one_mat = matrix(1, ncol=dim(x)[1], nrow=1)
 x = as.matrix(ozone)
 x = x[,-1]
-x2 = cbind(c(one_mat), x)
+x2 = cbind(c(one_mat), x) # This is to get the correct design matrix.
 
 solve(t(x2) %*% x2)*(1/(330-7))*sum(fit3$residuals)
 summary(fit3)$cov.scaled
 
+
+
 # fit5 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt, data=ozone)
+# summary(fit5)
+# drop1(fit5)
+
+## Part 2: 1.
+model1 = glm(Ozone~Temp, data=ozone, family=Gamma(link = "inverse"))
+summary(model1)
+model2 = glm(Ozone~Temp+Hum, data=ozone, family=Gamma(link = "inverse"))
+anova(model1, model2, test="Chisq")
+model3 = glm(Ozone~Temp+Hum+InvHt, data=ozone, family=Gamma(link = "inverse"))
+anova(model2, model3, test="Chisq")
+model4 = glm(Ozone~Temp+Hum+InvHt+Vis, data=ozone, family=Gamma(link = "inverse"))
+anova(model3, model4, test="Chisq") # Shows that model4 is not significantly better than model3
+model5 = glm(Ozone~Temp+Hum+InvHt+Wind, data=ozone, family=Gamma(link = "inverse"))
+anova(model3, model5, test="Chisq") # Shows that model5 is not significantly better than model3
+model6 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt, data=ozone, family=Gamma(link = "inverse"))
+anova(model3, model6, test="Chisq")
+model7 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt*Temp, data=ozone, family=Gamma(link = "inverse"))
+anova(model6, model7, test="Chisq")
+model8 = glm(Ozone~ Temp+I(Temp*Temp)+InvHt*Temp, data=ozone, family=Gamma(link = "inverse"))
+anova(model7, model8, test="Chisq") 
+summary(model8) # This seems to be a good fit
+anova(model1, model8, test="Chisq")
+
+# Residuals plots look fine, independent, randomly distributed and not skewed. 
+plot(model8) 
+hist(model8$residuals, breaks=50)
+
+
