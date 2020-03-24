@@ -50,17 +50,25 @@ summary(fit3)
 anova(fit4, fit, test="Chisq")
 summary(fit4)
 # Although both models seem to have similar ammounts of significance it would seem that fit3 using the
-# Gamma(link = "inverse") has less Resid. Dev than fit 4 and it would the better choice.
+# Gamma(link = "inverse") has less Resid. Dev than fit 3 and it would the better choice.
 
 ## 5.
 anova(fit2, fit, test="Chisq") # anova can not be used as fit2 has its dependent Ozone variable transformed by inverse.
 summary(fit2)
 summary(fit3)
-# Comparing the model from question 3 and question 4 I would definitly choose question 4 model as it provides higher
+# Comparing the model from question 3 and question 4, I would definitly choose question 4 model as it provides higher
 # significance on more variables. 
 
 ## 6.
 
+# According to p. 75 in the book, Definition 3.14 - Leverage:
+# var(beta) = sigma^2 * (x'x)^-1
+one_mat = matrix(1, ncol=dim(x)[1], nrow=1)
+x = as.matrix(ozone)
+x = x[,-1]
+x2 = cbind(c(one_mat), x)
 
+solve(t(x2) %*% x2)*(1/(330-7))*sum(fit3$residuals)
+summary(fit3)$cov.scaled
 
 # fit5 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt, data=ozone)
