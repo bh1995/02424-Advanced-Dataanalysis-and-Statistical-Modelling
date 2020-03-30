@@ -68,16 +68,27 @@ x = as.matrix(ozone)
 x = x[,-1]
 x2 = cbind(c(one_mat), x) # This is to get the correct design matrix.
 
-solve(t(x2) %*% x2)*(1/(330-7))*sum(fit3$residuals)
-summary(fit3)$cov.scaled
+mu = x2%*%fit3$coefficients
+w_beta = diag(fit3$weights%*%t(mu))
+###################################################
+X = model.matrix(fit3)
+mu = predict(fit3, type="response")
+g_prime_mu = 1/mu
+V_mu = mu**2
+w = 0.1652551 #fit3$weights
+W = w/((g_prime_mu**2)*V_mu)
+W_ = diag(w*V_mu)
 
+disp_mat = solve(t(X) %*% W %*% X)
+summary(fit3)$cov.scaled
+all.equal(disp_mat, summary(fit3)$cov.scaled)
 
 
 # fit5 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt, data=ozone)
 # summary(fit5)
 # drop1(fit5)
 
-## Part 2: 1.
+## Part 2: 1., 2.
 model1 = glm(Ozone~Temp, data=ozone, family=Gamma(link = "inverse"))
 summary(model1)
 model2 = glm(Ozone~Temp+Hum, data=ozone, family=Gamma(link = "inverse"))
@@ -99,6 +110,8 @@ anova(model1, model8, test="Chisq")
 
 # Residuals plots look fine, independent, randomly distributed and not skewed. 
 plot(model8) 
-hist(model8$residuals, breaks=50)
-
+hist(model8$residuals, breaks=50, probability=TRUE)
+lines(density(model8$residuals), # density plot
+      lwd=2, # thickness of line
+      col="chocolate3")
 
