@@ -109,3 +109,29 @@ lines(density(model8$residuals), # density plot
       lwd=2, # thickness of line
       col="chocolate3")
 
+# Using drop1 to find best fit model
+model1_ = glm(Ozone~ Temp*InvHt*Pres*Vis*Hgt*Hum*InvTmp*Wind, data=ozone, family=Gamma(link = "inverse")) # Most complex model possible
+
+# This function uses for and if loops, given R is bad with memory it takes time for more complex models ...
+drop_func = function(fit, alpha=0.1){
+  delta = c()
+  for(i in 1:length(coef(fit))) {
+    drp = drop1(fit, test="Chisq")
+    if(drp$`Pr(>Chi)`[which.max(drp$`Pr(>Chi)`)] >= alpha){
+      delta = c(delta, paste0(" -", row.names(drp)[which.max(drp$`Pr(>Chi)`)]))
+      fit = update(fit, paste("~ .", paste(delta, collapse=" ")))
+    } else{
+      return(fit)
+    }
+  }
+}
+m = drop_func(model1_, alpha=0.01)
+summary(m)
+m2 = drop_func(model1_, alpha=0.001) # Try with higher significance
+summary(m2) # InvTmp is not significant
+m2_ = update(m2, .~. -InvTmp)
+summary(m2_)
+anova(model8, m, test="Chisq") 
+anova(m, m2, test="Chisq")  # m2 looks to be the best model we can produce using drop1
+anova(m2, m2_, test="Chisq") # Not significantly better without InvTmp. 
+
