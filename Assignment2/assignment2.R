@@ -61,27 +61,21 @@ summary(fit3)
 
 ## 6.
 
-# According to p. 75 in the book, Definition 3.14 - Leverage:
-# var(beta) = sigma^2 * (x'x)^-1
-one_mat = matrix(1, ncol=dim(x)[1], nrow=1)
-x = as.matrix(ozone)
-x = x[,-1]
-x2 = cbind(c(one_mat), x) # This is to get the correct design matrix.
+# According to p. 106 in the book, Theorem 4.2:
+# Sigma = [X'W(beta)X]^-1
+# Where X is the model matrix and W(beta) = diag(wi/g'(mui)^2*V(mui))
+# wi is the estimated shape parameter of the Gamma distribution (which is our current models case)
+# alpha is the the dispertion paramter estimated in the given fit. Taking the diagonal of alpha mulitplied by 
+# the the estimated target values squared will give W(beta). 
 
-mu = x2%*%fit3$coefficients
-w_beta = diag(fit3$weights%*%t(mu))
-###################################################
 X = model.matrix(fit3)
-mu = predict(fit3, type="response")
-g_prime_mu = 1/mu
-V_mu = mu**2
-w = 0.1652551 #fit3$weights
-W = w/((g_prime_mu**2)*V_mu)
-W_ = diag(w*V_mu)
+alpha = 1/summary(fit3)$dispersion # dispersion value
+W = diag(alpha * fit3$fitted.values^2) # This is for the inverse link-function
+#W = w/((g_prime_mu**2)*V_mu)
 
 disp_mat = solve(t(X) %*% W %*% X)
 summary(fit3)$cov.scaled
-all.equal(disp_mat, summary(fit3)$cov.scaled)
+all.equal(disp_mat, summary(fit3)$cov.scaled, tolerance=1e-4)
 
 
 # fit5 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt, data=ozone)
