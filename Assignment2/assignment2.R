@@ -15,6 +15,9 @@ summary(fit)
 
 plot(fit)
 
+hist(fit$residuals)
+plot(fit$residuals, fit$fitted.values)
+
 Rd = residuals(fit,type='deviance')
 
 plot(ozone$Temp,Rd, xlab='Temp', ylab='Deviance residuals')
@@ -27,7 +30,10 @@ plot(ozone$InvTmp,Rd, xlab='InvTmp', ylab='Deviance residuals')
 plot(ozone$Wind,Rd, xlab='wind', ylab='Deviance residuals')
 
 ## 3.
-fit2 = glm(1/Ozone~., data=ozone)
+fit2 = glm(log(Ozone)~., data=ozone)
+plot(fit2)
+plot(fit2$residuals, fit2$fitted.values)
+
 summary(fit2)
 anova(fit2, test="Chisq")
 
@@ -77,8 +83,31 @@ disp_mat = solve(t(X) %*% W %*% X)
 summary(fit3)$cov.scaled
 all.equal(disp_mat, summary(fit3)$cov.scaled, tolerance=1e-4)
 
+# Alternative gaussian model:
+fit_g = glm(log(Ozone)~Temp + InvHt + InvTmp, data=ozone)
 
-# fit5 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt, data=ozone)
+X = model.matrix(fit_g)
+alpha = summary(fit_g)$dispersion # dispersion value
+W = diag((ozone$Ozone - fit_g$fitted.values)^2)
+solve(t(X) %*% W %*% X)         
+summary(fit_g)$cov.scaled
+
+# Make latex table for dispersion matrix
+library(xtable)
+
+lower = signif(disp_mat, 3)
+lower[lower.tri(disp_mat, diag=TRUE)]=""
+lower = as.data.frame(lower)
+x=xtable(lower)
+
+lower2 = signif(summary(fit3)$cov.scaled, 3)
+lower2[lower.tri(summary(fit3)$cov.scaled, diag=TRUE)]=""
+lower2 = as.data.frame(lower2)
+x2=xtable(lower2)
+
+
+
+  # fit5 = glm(Ozone~ Temp+I(Temp*Temp)+Hum+InvHt, data=ozone)
 # summary(fit5)
 # drop1(fit5)
 
@@ -134,4 +163,11 @@ summary(m2_)
 anova(model8, m, test="Chisq") 
 anova(m, m2, test="Chisq")  # m2 looks to be the best model we can produce using drop1
 anova(m2, m2_, test="Chisq") # Not significantly better without InvTmp. 
+
+plot(m2) 
+hist(m2$residuals, breaks=50, probability=TRUE, main="Histogram plot of residuals", xlab="Residuals", ylab="Density")
+lines(density(m2$residuals), # density plot
+      lwd=2, # thickness of line
+      col="chocolate3")
+
 

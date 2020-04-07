@@ -13,6 +13,15 @@ head(ozone)
 hist(ozone$Temp) #we can show the distribution of data 
 hist(ozone$Hum)
 
+par(mfrow=c(2,4))
+boxplot(ozone$Temp, ylab="Temp", main="Temp")
+plot(ozone$InvHt, ylab="InvHt", main="InvHt")
+
+boxplot(data$time~data$clo, xlab='clo', ylab='Time of observation', main = "Time of observation over clo", col=c("lightgreen","lightyellow","yellow","orange","red"))
+boxplot(data$tOut~data$clo, xlab='clo', ylab='Indoor temperature', main = "Indoor temperature over clo", col=c("lightgreen","lightyellow","yellow","orange","red"))
+boxplot(data$tInOp~data$clo, xlab='clo', ylab='Outdoor temperature', main = "Outdoor temperature over clo", col=c("lightgreen","lightyellow","yellow","orange","red"))
+
+
 cross.table <- table(ozone$Ozone,ozone$Wind,dnn = c("Ozone","Wind"))
 cross.table; #so we cna see that we dont have measurment in each of combination 
 
