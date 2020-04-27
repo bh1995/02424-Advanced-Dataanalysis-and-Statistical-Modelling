@@ -1,0 +1,1205 @@
+---
+title: 'Advanced Dataanalysis and Statistical Modelling - Assignment 3'
+author: "Anders Launer Bæk (s160159)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+header-includes: 
+    - \usepackage{graphicx}
+    - \usepackage{hyperref}
+    - \usepackage{amsmath}
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+knitr::opts_chunk$set(echo=FALSE, 
+                      include=TRUE,
+                      warning=FALSE,
+                      fig.width=8, fig.height=4,
+                      fig.show='hold', fig.align='center',
+                      eval=TRUE, 
+                      tidy=TRUE, 
+                      dev='pdf', 
+                      cache=TRUE, fig.pos="th!")
+
+library(ggplot2)
+library(dplyr)
+library(nlme)
+library(glmmTMB)
+library(numDeriv)
+source('~/DTU/Courses/ADSM/Projects/my_functions.R')
+```
+
+```{r include=FALSE}
+# get data 
+dat <- read.csv(file="~/DTU/Courses/ADSM/Projects/pro_3/data/rats.csv", header = T, sep = "\t") %>% 
+  select(-X) %>% 
+  mutate(week = ifelse(!is.na(week), week, X.1),
+         logw = ifelse(!is.na(logw), logw, X.2),
+         rat = as.factor(rat),
+         week = as.factor(week)) %>% 
+  select(-X.1, -X.2)
+n <- dim(dat)[1]
+p <- dim(dat)[2]
+pretty_n <- 4
+```
+
+<!--
+- https://physoc.onlinelibrary.wiley.com/doi/pdf/10.1113/jphysiol.1954.sp005141
+- 
+-->
+Sparring partners:
+
+* Andreas Vedel Jantzen (s162858)
+* Sana Ahmed (s134649)
+* Marie Riis Dammeyer (s134641)
+
+## Q 1.1
+The provided data set has `r n` observations which are treated by three different drugs. There are total of `r p` variables. The response variable has the following property:
+
+* `logw` is a non-negative continuous variable with the following statistics: `min=``r round(min(dat$logw), pretty_n)`, `mean=``r round(mean(dat$logw), pretty_n)`, `median=``r round(median(dat$logw), pretty_n)` and `max=``r round(max(dat$logw), pretty_n)`. The variable describes the log-transformed weight of the rat for a given week.
+
+There are three explanatory variables with the following properties:
+
+* `rat` is a nominal categorical variable with `r nlevels(dat$rat)` levels. Each level corresponds to a unique rat in the experiment.
+* `treatm` is a nominal categorical variable with three levels: `r paste(levels(dat$treatm), collapse = ", ")`. The variable describes the treatment for each rat during the experiment.
+* `week` is a nominal categorical variable with five levels: `r paste(levels(dat$week), collapse = ", ")`. The variable describes the week where the `logw` has been measured.
+
+The first step in the exploratory analysis is to report statistics of rats in the controlled trails, see the output below. 
+
+```{r}
+dat %>% mutate(no = n()) %>% 
+  group_by(treatm) %>% 
+  summarise(no = no[1],
+            `No. in treatm` = n(),
+            `No. rats` = length(unique(rat)),
+            Pct = `No. in treatm` / no * 100) %>% 
+  select(-no) %>% 
+  knitr::kable(., caption = "\\label{tb_1_0}Percentage distributions within each experiment.")
+```
+
+The number of in each of the three different treatments are not equally distributed, see table \ref{tb_1_0}. 
+There are three less in the `Thyroxin` trail and the inequality between numbers of rats needs to be considered during the modelling process.
+
+
+```{r, eval = FALSE, fig.cap="\\label{fig_1_1}Bar plot of the percentage distribution of rats in the controlled trails."}
+dat %>% mutate(no = n()) %>% 
+  group_by(treatm) %>% 
+  summarise(no = no[1],
+            no_treatm = n(),
+            rat_no = length(unique(rat)),
+            pct = no_treatm / no * 100,
+            pct_int = paste(as.integer(pct), "%")) %>% 
+  ggplot(., aes(x=treatm, y=pct)) + 
+  geom_bar(stat="identity") +
+  labs(x = "Treatment", y = "Precentage distribution") +
+  coord_flip() + theme_TS() +
+  geom_text(aes(label=pct_int), hjust=1, vjust=0, color="white", size=3.5)
+```
+
+The reported `summary()`-output (table \ref{tb_1_1}) below shows the selected statistics of the `logw` for each treatment.
+
+```{r}
+dat %>%
+  group_by(treatm) %>% 
+  summarise(`Min.` = min(logw),
+            `1st Qu.` = quantile(logw,probs = 0.25),
+            Median = median(logw),
+            Mean = mean(logw),
+            `3rd Qu.` = quantile(logw,probs = 0.75),
+            `Max.` = max(logw)) %>% 
+  knitr::kable(., caption = "\\label{tb_1_1}Summary() w.r.t. logw.")
+```
+
+
+Figure \ref{fig_1_2} visualizes the statistics of the above shown `summary()`-output.
+
+```{r, fig.cap="\\label{fig_1_2}Boxplots of the three treatments."}
+dat %>% 
+  ggplot(., aes(treatm, logw)) + 
+  geom_boxplot() + 
+  theme_TS() +
+  labs(x = "Treatment", y = "(log) Weight")
+```
+
+It is not clear to see the effects of the three treatments in the box-plots in figure \ref{fig_1_2} or in table \ref{tb_1_1}. Figure \ref{fig_1_4} shows the average `logw` as a function of week.
+
+```{r, eval=FALSE, fig.cap="\\label{fig_1_3}"}
+dat %>%
+  ggplot(., aes(x=week, y=logw, colour=treatm)) +
+  geom_point() +
+  theme_TS() +
+  labs(x = "Week", 
+       y = "(log) Weigth",
+       colour = "")
+```
+
+```{r, fig.cap="\\label{fig_1_4}The average log-weigth as a function of week."}
+pd <- position_dodge(0.1)
+dat %>%
+  group_by(week, treatm) %>% 
+  summarise(logw_mean = mean(logw),
+            logw_sd = sd(logw),
+            # logw_se = sd(logw) / sqrt(n()),
+            logw_l = logw_mean - logw_sd,
+            logw_h = logw_mean + logw_sd) %>% 
+ggplot(., aes(x=week, y=logw_mean, 
+              colour=treatm, group=treatm)) +
+  geom_errorbar(aes(ymin=logw_l, 
+                    ymax=logw_h),
+                alpha = 0.75, width=1.0, 
+                position=pd) +
+    geom_line(position=pd, alpha = 0.75) +
+    geom_point(position=pd, alpha = 0.75) +
+  theme_TS() +
+  labs(x = "Week", 
+       y = "(log) Weight",
+       colour = "Treatment",
+       group = "")
+```
+
+It has been chosen to add the $\pm$ one standard deviation as "error-bars" to each treatment for each time point in order to visualize the dispersion of the `logw` for the rats within each group.
+It is possible to see the effects of the changes in weight over time for each of the treatments in figure \ref{fig_1_4} which is not possible in figure \ref{fig_1_2} or in table \ref{tb_1_1}.
+
+* The effects of the three treatments are not clear to separate in the first two weeks. There is a separation from week three, where the `Plain` and the `Thyroxin` treatments outcomes are closely related throughout the experiment. The increase in weight are decreasing as a function of weeks for the `Thiouracil` drug. 
+* There are a larger dispersion in weight of the rats which have received the `Thyroxin` drug compared to the rats receiving the `Plain` treatment. The dispersion within the `Thyroxin` drug seems to grow has a function of time.
+
+### Change in weigth as a function of weeks
+
+Table \ref{tb_1_2} reports the similar statistics as table \ref{tb_1_1}, but now with a focus on the change in weight over weeks. 
+
+```{r}
+dat %>% 
+  tidyr::spread(., week, logw) %>% 
+  mutate(`1_to_2` =`2` - `1`,
+         `2_to_3` =`3` - `2`,
+         `3_to_4` =`4` - `3`,
+         `4_to_5` =`5` - `4`) %>% 
+  select(-`1`,-`2`,-`3`,-`4`,-`5`) %>% 
+  reshape2::melt(., id.vars = c("rat", "treatm"), 
+                 variable.name = "week", 
+                 value.name = "logw") %>% 
+  group_by(treatm) %>% 
+  summarise(`Min.` = min(logw),
+            `1st Qu.` = quantile(logw,probs = 0.25),
+            Median = median(logw),
+            Mean = mean(logw),
+            `3rd Qu.` = quantile(logw,probs = 0.75),
+            `Max.` = max(logw)) %>% 
+  knitr::kable(., caption = "\\label{tb_1_2}Summary() w.r.t. the change in logw over time.")
+```
+
+The explored patterns of the `Plain` and the `Thyroxin` drugs and pattern of the `Thiouracil` drug in figure \ref{fig_1_4} are supported by the `summary()` statistics in table \ref{tb_1_2}.
+
+Figure \ref{fig_1_5} visualizes box-plots for each of the treatments. The visual representation of table \ref{tb_1_2} supports the explored patterns of `Plain`, `Thyroxin` and `Thiouracil`.
+```{r, fig.cap="\\label{fig_1_5}A visual representation of the statistics in table \\ref{tb_1_2}."}
+dat %>% 
+  tidyr::spread(., week, logw) %>% 
+  mutate(`1_to_2` =`2` - `1`,
+         `2_to_3` =`3` - `2`,
+         `3_to_4` =`4` - `3`,
+         `4_to_5` =`5` - `4`) %>% 
+  select(-`1`,-`2`,-`3`,-`4`,-`5`) %>% 
+  reshape2::melt(., id.vars = c("rat", "treatm"), 
+                 variable.name = "week", 
+                 value.name = "logw") %>% 
+  ggplot(., aes(treatm, logw)) + 
+  geom_boxplot() + 
+  theme_TS() +
+  labs(x = "Treatment", y = "Change (log) Weight")
+```
+
+
+The final relevant exploratory plot for this data set is the one in figure \ref{fig_1_6}. The plot is combining several box-plots with the $\Delta$`logw` as a function of week for each of the three treatments.
+
+```{r, fig.cap="\\label{fig_1_6}A visual representation of the statistics in table \\ref{tb_1_2}."}
+dat_plot <- dat %>% 
+  tidyr::spread(., week, logw) %>% 
+  mutate(`1_to_2` =`2` - `1`,
+         `2_to_3` =`3` - `2`,
+         `3_to_4` =`4` - `3`,
+         `4_to_5` =`5` - `4`) %>% 
+  select(-`1`,-`2`,-`3`,-`4`,-`5`) %>%  
+  reshape2::melt(., id.vars = c("rat", "treatm"), 
+                 variable.name = "week", 
+                 value.name = "logw")
+
+multiplot(
+  dat_plot %>% 
+  filter(week == "1_to_2") %>% 
+  ggplot(., aes(treatm, logw)) + 
+  geom_boxplot() + 
+  scale_y_continuous(limits = c(0.025, 0.45), breaks = seq(from = 0.025, to = 0.45, by = 0.1)) +
+  theme_TS() +
+  theme(axis.ticks=element_blank(),
+        axis.text.x = element_text(angle = 90)) +
+  labs(x = "W1 to W2", y = "Change from week to week (log) Weight"),
+dat_plot %>% 
+  filter(week == "2_to_3") %>% 
+  ggplot(., aes(treatm, logw)) + 
+  geom_boxplot() + 
+  scale_y_continuous(limits = c(0.025, 0.45)) +
+  theme_TS() + 
+  theme(axis.text.y=element_blank(), 
+        axis.ticks=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(angle = 90)) +
+  labs(x = "W2 to W3", y = ""),
+dat_plot %>% 
+  filter(week == "3_to_4") %>% 
+  ggplot(., aes(treatm, logw)) + 
+  geom_boxplot() + 
+  scale_y_continuous(limits = c(0.025, 0.45)) +
+  theme_TS() +
+  theme(axis.text.y=element_blank(), 
+        axis.ticks=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(angle = 90)) +
+  labs(x = "W3 to W4", y = ""),
+dat_plot %>% 
+  filter(week == "4_to_5") %>% 
+  ggplot(., aes(treatm, logw)) + 
+  geom_boxplot() + 
+  scale_y_continuous(limits = c(0.025, 0.45)) +
+  theme_TS() + 
+  theme(axis.text.y=element_blank(), 
+        axis.ticks=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(angle = 90)) +
+  labs(x = "W4 to W5", y = ""),
+cols=4)
+#
+rm(dat_plot)
+```
+
+* There is a general decreasing trend in the growth of weight of the rats as a function of weeks.
+* The pattern shows a similar behavior between the `Plain` and the `Thyroxin` treatments except for the first week. Here is the general trend for `Thyroxin` more restrictive in growth of weight compared to the `Plain` treatment.
+* There are two extreme outliers in the first and in the second week for the `Thyroxin` drug. This can identicate that one (or two different) rats get a large restrictive effect when receiving the drug.
+A thorough analysis of outliers has not been carried out due to time.
+* The `Thiouracil` treatment has the largest restrictive effect of the growth in weight compared to the `Plain` and the `Thyroxin` treatments except for the first week.
+
+
+\newpage
+## Q 1.2
+
+To overcome the possibly high correlation between the observations of the same rat is to transform the data set into one observation per rat. This transformation can be done by: `tidyr::spread(dat, week, logw)`-function. Table \ref{tb_1_3} reports the transformed data set.
+
+```{r}
+dat_spred <- dat %>% 
+  tidyr::spread(., week, logw) %>% 
+  mutate(`1_to_2` =`2` - `1`,
+         `2_to_3` =`3` - `2`,
+         `3_to_4` =`4` - `3`,
+         `4_to_5` =`5` - `4`,
+         logw_delta =`5` - `1`) %>% 
+  select(-`1`,-`2`,-`3`,-`4`,-`5`)
+
+dat_spred %>% 
+  knitr::kable(., caption = "\\label{tb_1_3}New independent structure (variable: dat_spred).")
+```
+
+The `summary()`-statistics is calculated on the new data set `dat_spred` and reported in table \ref{tb_1_4}.
+
+
+```{r}
+dat_spred %>% 
+  group_by(treatm) %>% 
+  summarise(`Min.` = min(logw_delta),
+            `1st Qu.` = quantile(logw_delta, probs = 0.25),
+            Median = median(logw_delta),
+            Mean = mean(logw_delta),
+            `3rd Qu.` = quantile(logw_delta, probs = 0.75),
+            `Max.` = max(logw_delta)) %>% 
+  knitr::kable(., caption = "\\label{tb_1_4}Summary() w.r.t. logw\\_delta on new structure (variable: dat_spred).")
+```
+
+
+```{r, eval=FALSE,fig.cap="\\label{fig_1_6}"}
+dat_spred %>%
+  ggplot(., aes(treatm, logw_delta)) + 
+  geom_boxplot() +
+  theme_TS() +
+  labs(x = "Treatment", y = "Change from W1 to W5 (log) Weight")
+```
+
+The new dependency structure w.r.t. treatment and the effect of weight change over the five weeks can be analysed by fitting a simple random effect model. It is assumed that each rat has its own random effect on the change in weight and the response variable will be modelled as the total change in weight during the experiment. See the chunk below:
+```{r, echo=TRUE}
+fit_0 <- lme(logw_delta ~ treatm, random=~1|rat, data=dat_spred, method="ML")
+```
+
+Table \ref{tb_1_5} reports the ANOVA-table of the fit. As already explored, the `treatm`-variable is significant in order to predict the effect (`logw_delta`) of the three different drugs. 
+```{r}
+anova(fit_0) %>% 
+  knitr::kable(., caption = "\\label{tb_1_5}ANOVA-table of model fit\\_0.")
+```
+
+Table \ref{tb_1_6} reports the fixed coefficients of the model `fit_0`.
+
+```{r}
+fixed.effects(fit_0) %>% data.frame(.) %>% rename(., Value = `.`)  %>%
+  knitr::kable(., caption = "\\label{tb_1_6}Fixed effects of model fit\\_0.")
+```
+
+The fixed effect for `Thyroxin` is supposed to be sightly lower than `Plain` and the fixed effect for `Thiouracil` is supposed to be lower than `Plain`. These modelled fixed effects are supported by the plots in figure \ref{fig_1_5} and statistics in table \ref{tb_1_2}.
+
+The random effects can be interpreted as a "latent" variable which can not be observed. The random effects can be extracted by using the `random.effects()`-function and their `summary()`-statistics are reported in table \ref{tb_1_7}. The `visreg()`-function has been applied in order to visualize the random effect from each rat w.r.t. the estimated model, see figure \ref{fig_1_7}.
+
+The preliminary goal of reporting the statistics of the random effects is to validate the underlying assumptions of Gaussianity.
+
+```{r}
+data.frame(random.effects(fit_0)) %>% 
+  summarise(`Min.` = min(`X.Intercept.`),
+            `1st Qu.` = quantile(`X.Intercept.`, probs = 0.25),
+            Median = median(`X.Intercept.`),
+            Mean = mean(`X.Intercept.`),
+            `3rd Qu.` = quantile(`X.Intercept.`, probs = 0.75),
+            `Max.` = max(`X.Intercept.`)) %>% 
+  knitr::kable(., caption = "\\label{tb_1_7}Summary() w.r.t. the random effects.")
+```
+
+```{r, fig.cap="\\label{fig_1_7}Visualizing the random effects for each rat."}
+library(visreg)
+visreg(fit_0, gg = TRUE, xvar = "rat", by = "treatm") +
+  theme_TS() +
+  labs(x = "rat", y = "Mean respose + random effects")
+```
+
+The random effects forefills the properties of Gaussianity w.r.t. the reported statistics in table \ref{tb_1_7} and  in the visualization in figure \ref{fig_1_7}.
+
+\newpage
+
+## Q 1.3
+
+### Simple linear mixed model
+
+It has been chosen to use the initial structure of the data set to fit the simple linear mixed model. The fixed effects are `treatm`, `week` and their interaction. The random effect, as earlier discovered, is the rat. The chunk below shows the construction of the simple linear mixed model:
+
+```{r, echo=TRUE}
+fit_simple <- lme(logw ~ treatm + week + treatm:week, random=~1|rat,
+                  data=dat, method="ML")
+```
+
+
+```{r}
+#
+coef <- round(summary(fit_simple)$tTable[,"Value"], 4)
+#
+anova(fit_simple) %>% 
+  knitr::kable(., caption = "\\label{tb_1_8}ANOVA-table of model fit\\_simple.")
+```
+
+\newpage
+The estimated parameters of the simple linear mixed effect model are given in (\ref{eq_1_1}). According to the ANOVA-table (table \ref{tb_1_8}) all included parameters are significantly estimated.
+
+\begin{equation}
+\begin{aligned}
+Y_i  =& `r paste(coef[1], " \\,+ ", gsub("[:]"," \\\\cdot ", gsub("I[(]|[(]|[)]","",paste("\\\\& ", coef[-1], " \\cdot ", names(coef)[-1], "_{i} \\,+ ", collapse = " "))))` \\ &\beta_i \, + \\ &\epsilon_i
+\end{aligned}
+\label{eq_1_1}
+\end{equation}
+
+where $\beta_i$ is the random effect from each rat ($i = 1,\,2,\,...,\,27$). 
+
+The `summary()`-statistics of the random effects are reported in table \ref{tb_1_9} and the visualization of the random effects w.r.t. the estimated model is showed in figure \ref{fig_1_8}. Despite the median being slightly negatively skewed the properties of Gaussianity is obtained to a high degree.
+
+```{r}
+data.frame(random.effects(fit_simple)) %>% 
+  summarise(`Min.` = min(`X.Intercept.`),
+            `1st Qu.` = quantile(`X.Intercept.`, probs = 0.25),
+            Median = median(`X.Intercept.`),
+            Mean = mean(`X.Intercept.`),
+            `3rd Qu.` = quantile(`X.Intercept.`, probs = 0.75),
+            `Max.` = max(`X.Intercept.`)) %>% 
+  knitr::kable(., caption = "\\label{tb_1_9}Summary() w.r.t. the random effects.")
+```
+
+
+```{r, fig.cap="\\label{fig_1_8}Visualizing the random effects for each rat."}
+visreg(fit_simple, gg = TRUE, xvar = "rat", by = "treatm") +
+  theme_TS() +
+  #scale_y_continuous(limits = c(0.8, 1.15), breaks = seq(from = 0, to = 2, by = 0.05)) +
+  labs(x = "rat", y = "Mean respose + random effects")
+```
+
+
+### log-weight development over time as a second degree polynomial over time
+
+One property of the second degree polynomial model is that the `week`-variable must not be a categorical variable. As illustrated inside the chunk below is has been transformed to a numeric value. Instead of using the `lme()`-function, the `lm()`-function has been applied to fix the new second order polynomial model.
+
+```{r, echo=TRUE}
+fit_poly <- dat %>% mutate(week = as.numeric(week)) %>% 
+  lm(logw ~ treatm + week + I(week^2) + treatm:week, data=.)
+```
+
+```{r}
+#
+coef <- round(coef(fit_poly), 4)
+#
+anova(fit_poly) %>% 
+  knitr::kable(., caption = "\\label{tb_1_10}ANOVA-table of model fit\\_poly.")
+```
+
+The estimated parameters of the second order polynomial model are given in (\ref{eq_1_2}). According to the ANOVA-table (table \ref{tb_1_10}) all the included parameters are significant predictors.
+
+\begin{equation}
+\begin{aligned}
+Y_i  =& `r paste(coef[1], " \\,+ ", gsub("[:]"," \\\\cdot ", gsub("I[(]|[(]|[)]","",paste("\\\\& ", coef[-1], " \\cdot ", names(coef)[-1], "_{i} \\,+ ", collapse = " "))))` \\ &\beta_i \, + \\ &\epsilon_i
+\end{aligned}
+\label{eq_1_2}
+\end{equation}
+
+where $\beta_i$ is the random effect from each rat ($i = 1,\,2,\,...,\,27$). 
+
+Figure \ref{fig_1_10} shows the realizations of the three treatments modelled by a second order polynomial model.
+
+```{r, fig.cap="\\label{fig_1_10}Polynominal realizations of the three treatments."}
+n_res <- 200
+dat_pred <- rbind(data.frame(week = seq(from = 1, to = 5, length.out = n_res),
+                             treatm = as.factor(rep("Plain", n_res))),
+                  data.frame(week = seq(from = 1, to = 5, length.out = n_res),
+                             treatm = as.factor(rep("Thiouracil", n_res))),
+                  data.frame(week = seq(from = 1, to = 5, length.out = n_res),
+                             treatm = as.factor(rep("Thyroxin", n_res)))) %>% 
+  mutate(treatm = as.factor(treatm))
+dat_pred$logw <- predict(fit_poly, dat_pred)
+
+# plot 
+ggplot(dat ,aes(x=week, y=logw, colour=treatm, group=treatm)) +
+  geom_point() +
+  geom_line(data = dat_pred, aes(x=week, y=logw, colour=treatm, group=treatm))+
+  theme_TS() +
+  labs(x = "Week", 
+       y = "(log) Weigth",
+       colour = "")
+```
+
+\newpage
+
+### Comparison of the mixed effect model and the polynominal model
+
+Table \ref{tb_1_12} summaries the selected metrics of the latter two models. 
+
+```{r}
+anova(fit_simple, fit_poly, test = FALSE) %>% data.frame(.) %>% select(-call) %>% 
+  knitr::kable(., caption = "\\label{tb_1_12}Performance metrics of the two models.")
+```
+
+The `fit_simple` model obtains the best metrics w.r.t. the lowest values of `AIC`, `BIC` and the highest value of `logLik`. Thus the higher model complexity (lower value of `df`, the number of degrees of freedom, in the model) of the `fit_simple` model, the reported model metrics are still prominently better for the `fit_simple` model.
+
+
+\newpage
+
+## Q 1.4
+
+The repeated measurement model are given in (\ref{eq_1_3}). It has been chosen to use a Gaussian "spatial" correlation structure ($V_{i_1,\,i_2}$). This should fore fill the correlation structure where the measurements within each rat is explicitly specified. Furthermore the random effects, of the rats, has been evaluated to be close to Gaussian distributed, see table \ref{tb_1_7} and table \ref{tb_1_9}.
+
+\begin{equation}
+\begin{aligned}
+Y_i \sim& \mathcal{N}\left( \mu_i, \,V_{i_1,\,i_2}  \right) \\
+\mu_i  =& \mu + \alpha\left( treatm_i \right) +\beta\left( week_i \right) + \gamma\left( treatm_i,\,week_i \right) \\
+V_{i_1,\,i_2} =&\begin{cases}\begin{matrix} 0 & ,\, \, if\, \, week_{ i_{ 1 } }\neq week_{ i_{ 2 } }\, \, and \, \, i_{ 1 }\neq i_{ 2 } \\ v^{ 2 }+\tau^2 \, exp\left\{ \frac { -\left( week_{ i_{ 1 } }-week_{ i_{ 2 } } \right) ^{ 2 } }{ \rho ^{ 2 } }  \right\}  & ,\, \, if\, \, week_{ i_{ 1 } }=week_{ i_{ 2 } }\, \, and\, \, i_{ 1 }\neq i_{ 2 } \\ v^{ 2 }+\tau ^{ 2 }+\sigma ^{ 2 } & ,\,\, if\,\, i_1 = i_2 \end{matrix}   \end{cases}
+\end{aligned}
+\label{eq_1_3}
+\end{equation}
+where $v$, $\tau$, $\sigma$ and $\rho$ are parameters which need to be estimated by the model\footnote{Lecture 9, slide 43-44.}. See the chunk below to see the implementation in R.
+
+```{r, echo = TRUE}
+fit_simple_gau <- lme(logw ~ treatm + week + treatm:week, random=~1|rat,
+                      correlation=corGaus(form=~as.numeric(week)|rat, nugget=T),
+                      data=dat, method="ML")
+```
+
+
+```{r, eval=FALSE}
+fit_simple_gau <- lme(logw ~ treatm + week + treatm:week, random=~1|rat,
+                      correlation=corGaus(form=~as.numeric(week)|rat, nugget=T),
+                      data=dat, method="ML")
+fit_simple_exp <- lme(logw ~ treatm + week + treatm:week, random=~1|rat,
+                      correlation=corExp(form=~as.numeric(week)|rat, nugget=T),
+                      data=dat, method="ML")
+fit_simple_comp <- lme(logw ~ treatm + week + treatm:week, random=~1|rat,
+                       correlation=corCompSymm(form=~1|rat),
+                       data=dat, method="ML")
+```
+
+Table \ref{tb_1_13} reports the ANOVA-table of the estimated model `fit_simple_gau`.
+
+```{r}
+coef <- round(summary(fit_simple_gau)$tTable[,"Value"], 4)
+#
+anova(fit_simple_gau) %>% 
+  knitr::kable(., caption = "\\label{tb_1_13}ANOVA-table of model fit\\_simple\\_gau.")
+```
+
+
+Figure \ref{fig_1_11} shows a Variogram. The plot visualizes whether the assumption of the chosen correlation structure is correct or not. The chosen correlation structure seems to be suitable.
+
+```{r, fig.cap="\\label{fig_1_11}Variogram of the reapeated measurement model."}
+plot(Variogram(fit_simple_gau))
+# 
+# fit_simple_gau
+V_list <- data.frame(v = as.numeric(fit_simple_gau$coefficients$fixed["(Intercept)"]),
+                  rho = as.numeric(exp(attr(fit_simple_gau$apVar,"Pars")))[2],
+                  nu = as.numeric(exp(attr(fit_simple_gau$apVar,"Pars")))[3],
+                  sig = as.numeric(exp(attr(fit_simple_gau$apVar,"Pars")))[4],
+                  tau = sqrt(-(as.numeric(exp(attr(fit_simple_gau$apVar,"Pars")))[3]-1)*as.numeric(exp(attr(fit_simple_gau$apVar,"Pars")))[4]^2) / sqrt(as.numeric(exp(attr(fit_simple_gau$apVar,"Pars")))[3]))
+
+
+
+```
+
+
+\newpage
+The estimated parameters of the model are given in (\ref{eq_1_4}). According to the ANOVA-table (table \ref{tb_1_13}) all included parameters are significant predictors.
+
+\begin{equation}
+\begin{aligned}
+Y_i \sim& \mathcal{N}\left( \mu_i, \,V_{i_1,\,i_2}  \right) \\
+\mu_i =& `r stringi::stri_sub(paste(coef[1], " \\, + ", gsub("[:]"," \\\\cdot ", gsub("I[(]|[(]|[)]","",paste("\\\\& ", coef[-1], " \\cdot ", names(coef)[-1], "_{i}\\,+ ", collapse = " ")))), to = -5)` \\
+%
+%
+V_{i_1,\,i_2}  =&\begin{cases}\begin{matrix} 0 & ,\, \, if\, \, week_{ i_{ 1 } }\neq week_{ i_{ 2 } } \, \, and \, \, i_{ 1 }\neq i_{ 2 } \\ `r round(V_list$v^2,4)` + `r round(V_list$tau^2,4)` \, exp\left\{ \frac { -\left( week_{ i_{ 1 } }-week_{ i_{ 2 } } \right) ^{ 2 } }{ \rho ^{ 2 } }  \right\}  & ,\, \, if\, \, week_{ i_{ 1 } }=week_{ i_{ 2 } }\, \, and\, \, i_{ 1 }\neq i_{ 2 } \\ `r round(V_list$v^2,4)`+`r round(V_list$tau^2,4)`+`r round(V_list$sig^2,4)` & ,\,\, if\,\, i_1 = i_2 \end{matrix}   \end{cases}
+\end{aligned}
+\label{eq_1_4}
+\end{equation}
+
+where subset $i$ explicitly identicate each rat ($i = 1,\,2,\,...,\,27$). 
+
+The `summary()`-statistics of the random effects are reported in table \ref{tb_1_14} and the visualization of the random effects w.r.t. the estimated model are showed in figure \ref{fig_1_12}. The relation between the mean and the median entails a negatively skewed distribution of the random effects thus is conflicting with the properties of Gaussianity.
+
+```{r}
+data.frame(random.effects(fit_simple_gau)) %>% 
+  summarise(`Min.` = min(`X.Intercept.`),
+            `1st Qu.` = quantile(`X.Intercept.`, probs = 0.25),
+            Median = median(`X.Intercept.`),
+            Mean = mean(`X.Intercept.`),
+            `3rd Qu.` = quantile(`X.Intercept.`, probs = 0.75),
+            `Max.` = max(`X.Intercept.`)) %>% 
+  knitr::kable(., caption = "\\label{tb_1_14}Summary() w.r.t. the random effects.")
+```
+
+
+```{r, fig.cap="\\label{fig_1_12}Visualizing the random effects for each rat."}
+visreg(fit_simple_gau, gg = TRUE, xvar = "rat", by = "treatm") +
+  theme_TS() +
+  #scale_y_continuous(limits = c(0.8, 1.15), breaks = seq(from = 0, to = 2, by = 0.05)) +
+  labs(x = "rat", y = "Mean respose + random effects")
+```
+
+
+\newpage
+
+## Q 1.5
+
+A few selected model performance metrics of the three previous models (`fit_simple`, `fit_poly` and `fit_simple_gau`) are reported in table \ref{tb_1_15}. 
+The least appropriate model is the second order polynomial model; `fit_poly`. This model is capable of differentiating between the treatments but not the "hidden" random effects within the rats. The main difference between `fit_simple` and `fit_simple_gau` is the defined correlation structure in `fit_simple_gau`. It is possible to capture the variation of the measurements during the experiment for each rat.
+
+```{r}
+anova(fit_simple, fit_poly, fit_simple_gau, test = FALSE) %>% data.frame(.) %>% select(-call) %>% 
+  knitr::kable(., caption = "\\label{tb_1_15}Performance metrics of the three models.")
+```
+
+
+The `fit_simple_gau` is the most suitable model for describing the data set.
+
+Throughout the modelling process of the three treatments the following conclusions can be made: 
+
+* The two drugs and the control group have on average the same growth patterns.
+* After the first two weeks the control group (`Plain`) and the `Thyroxin` drug group follow the same rate. The growth rate of the `Thiouracil` drug group is more restrictive to the weight gain of the rats.
+
+
+<!--
+New part.
+--> 
+\newpage
+
+```{r include=FALSE}
+rm(list = ls())
+source('~/DTU/Courses/ADSM/Projects/my_functions.R')
+# get data 
+dat <- read.csv(file="~/DTU/Courses/ADSM/Projects/pro_3/data/simdat3.csv", header = T, sep = " ") %>% 
+  mutate(group = as.factor(group))
+n <- dim(dat)[1]
+p <- dim(dat)[2]
+pretty_n <- 4
+```
+
+## Q2.1
+The provided data set contains `r n` observations with a total of `r p` variables. The response variable has the following property:
+
+* `y` is a non-negative discrete count variable with the following statistics: `min=``r round(min(dat$y), pretty_n)`, `mean=``r round(mean(dat$y), pretty_n)`, `median=``r round(median(dat$y), pretty_n)`, `max=``r round(max(dat$y), pretty_n)` and `r length(unique(dat$y))` unique count values.
+
+There are three explanatory variables with the following properties:
+
+* `group` is a nominal categorical variable with `r nlevels(dat$group)` levels: `1, 2, ..., 30`. The variable is a grouping variable.
+* `x1` is a non-negative continuous variable with the following statistics: `min=``r round(min(dat$x1), pretty_n)`, `mean=``r round(mean(dat$x1), pretty_n)`, `median=``r round(median(dat$x1), pretty_n)` and `max=``r round(max(dat$x1), pretty_n)`. The variable describes the first regressor.
+* `x2` is a non-negative continuous variable with the following statistics: `min=``r round(min(dat$x2), pretty_n)`, `mean=``r round(mean(dat$x2), pretty_n)`, `median=``r round(median(dat$x2), pretty_n)` and `max=``r round(max(dat$x2), pretty_n)`. The variable describes the first regressor.
+
+In further analysis, which was excluded, it can be concluded that the two regressors `x1` and `x2` are uniform distributed within the interval `0` to `1`.
+
+```{r, eval=FALSE}
+for (ii in 1:30){
+  message(ii)
+  message(dat %>% filter(group == ii) %>%
+  summarise(x1s = sum(x1),
+            x2s = sum(x2)))
+
+}
+```
+
+Table \ref{tb_2_1} reports the statistics of the response variable `y` for each group. There are `r length(unique(dat$group))` groups within this data set with equally balanced numbers of observations in each group.
+
+```{r}
+dat %>%
+  group_by(group) %>% 
+  summarise(N = n(),
+            `Min.` = min(y),
+            `1st Qu.` = quantile(y, probs = 0.25),
+            `Median` = median(y),
+            `Mean` = mean(y),
+            `3rd Qu.` = quantile(y, probs = 0.75),
+            `Max.` = max(y)) %>% 
+  mutate_if(is.numeric, as.integer) %>% 
+  # head(., 5) %>% 
+  knitr::kable(., caption = "\\label{tb_2_1}Summary()-statistics of the response variable y for each group.")
+```
+
+The `summary()`-statistics of the response show a different pattern for each group. Figure \ref{fig_2_1} visualizes the response as a function of the two regressors. There are ten points in the scatter plot where each point is representing an observation in each group. The size of the circle is representing the value of `y` which is hard to interpret due to the "same" locations in the scatter plot.
+
+```{r, fig.cap="\\label{fig_2_1}Grouping structure of the variables..", fig.asp=1}
+dat %>% # filter(group == 1) %>% 
+ggplot(., aes(x = x1, y = x2, colour=group, group = group, size = y, label = group)) +
+  geom_point(alpha=0.5) +
+  # geom_text() +
+  labs(x = "x1", y = "x2", color = "Group", size = "y") +
+  theme_TS()
+```
+
+Figure \ref{fig_2_1_1} visualizes the count values of `y` for each group. It is possible to conclude that the different groups form different structures.
+
+```{r, fig.cap="\\label{fig_2_1_1}Grouping structure of the variables.", fig.asp=1}
+dat %>%
+ggplot(., aes(x = group, y = y, group=group)) +
+  geom_point(alpha=0.5) +
+  labs(x = "Group", y = "y", color = "Group", size = "Count") +
+  theme_TS()
+```
+
+The different structure of each group needs to be modelled.
+
+\newpage
+
+
+## Q2.2
+<!--
+- Fit a generalized linear model and argue that the grouping structure needs to be taken into account
+
+The hierarchical structure arises here from the fact that the so-called first stage model describes the observations given the random effects, and the second stage model is a model for these random effects.
+In a general setting mixed models describes dependence between observa- tions within and between groups by assuming the existence of one or more unobserved latent variables for each group of data. The latent variables are assumed to be random and hence referred to as random effects. Hence a mixed model consists of both fixed model parameters θ and random effects U, where the random effects are described by another model and hence another set of parameters describing the assumed distribution for the random effects.
+The hierarchical structure of the models implies that the mixed models are a powerful class of models used for the analysis of correlated data. As it will be demonstrated in this chapter, the grouping structure induces a correlation structure of the data even in the classical case of independent data within the groups.
+Mixed effects models can handle more general correlation structures than simply correlations between groups. Examples include simple correlation in time between the observations as for time series data; see e.g., Madsen (2008) and problems with missing data.
+-->
+
+The estimation of the generalized linear model is shown in the code chunk below. The model is a single stage model which does not consider any grouping effects.
+
+```{r, echo=TRUE}
+fit_glm <- glm(y ~ x1 + x2 + x1:x2, family = poisson(link = "log"), data = dat)
+```
+
+Table \ref{tb_2_2_1} reports the `Summary()`-statistics of the estimated residuals by the GLM.
+The statistics variates clearly within each of the groups which tells that there are several specific structures and not only one structure can explain the random effects of the groups.
+
+```{r}
+dat %>% 
+  mutate(res_fit = fit_glm$residuals) %>% 
+  group_by(group) %>% 
+  summarise(`Min.` = min(res_fit),
+            `1st Qu.` = quantile(res_fit, probs = 0.25),
+            `Median` = median(res_fit),
+            `Mean` = mean(res_fit),
+            `3rd Qu.` = quantile(res_fit, probs = 0.75),
+            `Max.` = max(res_fit)) %>% 
+  knitr::kable(., caption = "\\label{tb_2_2_1}Summary()-statistics of the residuals from the estimated GLM model for each group.")
+```
+
+\newpage
+
+Table \ref{tb_2_2_1} is supported by the visual representation of the realization of the residuals as a function of time in figure \ref{fig_2_2}. The different colors are mapping the different groups.
+
+```{r, fig.cap="\\label{fig_2_2}Scatter plot of the residuals as a function of time. "}
+dat %>% 
+  mutate(res_fit = fit_glm$residuals,
+         t = 1:n(),
+         fit = fit_glm$fitted.values) %>% 
+  ggplot(., aes(y=res_fit, x=t, colour=group, group=group)) +
+  geom_point() +
+  labs(x = "Group", y = "y", color = "Group", size = "Count") +
+  theme_TS()
+```
+
+
+**Grouping structure: ** Table \ref{tb_2_2_1} and figure \ref{fig_2_2} illustrates the variation of the residuals within each of the groups. It can therefore be concluded that it might be possible to obtain a better model of the random effects from the `r length(unique(dat$group))` groups that are included in the model.
+
+\newpage
+## Q2.3
+The property of the second stage is the random effects are Gaussian when using the `glmmTMB()`-function estimating the model.
+
+
+### Q2.3.1 Write down the model and the estimates, and the interpretation of the parameters
+<!--
+https://support.sas.com/rnd/app/stat/examples/BayesSalm93/stat_webex.pdf
+-->
+
+The model is given in (\ref{eq_2_1}) and the estimated parameters are given in (\ref{eq_2_2}).
+
+\begin{equation}
+\begin{aligned}
+Y_{ ij }\sim& \mathcal{P}\left( \eta_{ ij } \right)  \\
+\eta_{ ij } =&e^{X_{ i }\beta + U_{ ij } }\\
+U_{ij} \sim& \mathcal{N} \left( u_{ij},\, \sigma^2_r \right) 
+\end{aligned}
+\label{eq_2_1}
+\end{equation}
+where $X_i$ is the design matrix which includes a constant $1$, the two regressors and their interaction. $i = 1,\,2,\, ...,\,300$ for each observation, $j = 1,\,2,\, ...,\,30$ for each group. $U_{ij}$ is the random effect from each group and $\sigma^2_r$ is the dispersion among the groups.
+
+The code chunk below shows the implementation of the `glmmTMB()`-function which is used to estimate the fixed effects and the mixed effects. The implementations corresponds to (\ref{eq_2_1}).
+
+```{r, echo=TRUE}
+fit_TMB <- glmmTMB(formula = y ~ x1 + x2 + x1:x2 + (1|group),
+                   family = poisson(link = "log"), data = dat)
+```
+
+```{r}
+coef_Q3 <- round(c(fit_TMB$fit$par[-5],exp(fit_TMB$fit$par[5])), 4)
+
+fit_TMB_obj <- fit_TMB$fit$objective
+fit_TMB_re <- fit_TMB$fit$parfull[names(fit_TMB$fit$parfull) %in% "b"]
+# names(coef_Q3) <- c("(Intercept)","x1","x2","x1:x2", "sigma2")
+```
+The estimated fixed effects are showed in (\ref{eq_2_2}). 
+
+\begin{equation}
+\begin{aligned}
+Y_{ ij }\sim& \mathcal{P}\left( \eta_{ ij } \right)  \\
+\eta_{ ij } =& e^{X_i\cdot `r paste0("\\begin{bmatrix}", paste(coef_Q3[-5], collapse = "\\\\"), "\\end{bmatrix}")`+ U_{ij}}\\
+U_{ij } \sim& \mathcal{N} \left( u_{ij},\, `r coef_Q3[5]` \right) 
+\end{aligned}
+\label{eq_2_2}
+\end{equation}
+where $u_{ij}$ is an estimated vector with `r length(fit_TMB_re)` elements. Analysis of the random effects are reported in table \ref{tb_2_3} and visualized in figure \ref{fig_2_3}. The random effects must follow the properties of Gaussianity in order to be a valid second stage model estimated by the `glmmTMB()`-function.
+
+
+The estimated parameters indicate large values of `y` for high values of `x1` and low values of `x2`. If the values of `x2` are increasing the values of `y` are decreasing. The pattern is supported by figure \ref{fig_2_1}.
+
+### Q2.3.2 Plot the estimated random effects in some appropriate way
+
+The `summary()`-statistics of the random effects are reported in table \ref{tb_2_3} and the visualization of the random effects is showed in figure \ref{fig_2_3} and visualized in the QQ-plot in figure \ref{fig_2_5}.
+
+```{r}
+data.frame(re = fit_TMB_re) %>% 
+  summarise(`Min.` = min(re),
+            `1st Qu.` = quantile(re, probs = 0.25),
+            Median = median(re),
+            Mean = mean(re),
+            `3rd Qu.` = quantile(re, probs = 0.75),
+            `Max.` = max(re)) %>% 
+  knitr::kable(., caption = "\\label{tb_2_3}Summary() w.r.t. estimated random effects.")
+```
+
+
+```{r, fig.cap="\\label{fig_2_3}Visualizing the random effects for each of the groups."}
+dat_TMB <- data.frame(re = fit_TMB_re,
+           re_mean = rep(mean(fit_TMB_re), length(fit_TMB_re)),
+           group = factor(1:length(fit_TMB_re)))
+
+ggplot(dat_TMB, aes(y=fit_TMB_re, x = group)) +
+  geom_point(aes(colour = "Random effects")) +
+  geom_hline(aes( yintercept = re_mean, colour = "Average")) +  
+  labs(x = "Group", y = "Random effect", color = "") +
+  theme_TS()
+k <- 10000
+```
+
+```{r, eval=FALSE, fig.cap="\\label{fig_2_4}A histogrom of the random effects."}
+no_bins <- as.integer(diff(range(dat_TMB$re)) / (2 * IQR(dat_TMB$re) / length(dat_TMB$re)^(1/3)))
+
+ggplot(dat_TMB, aes(fit_TMB_re)) +  
+  geom_histogram(bins = no_bins) +
+  labs(y = "Count", x = "Random effect", color = "") +
+  theme_TS()
+```
+
+```{r, fig.cap="\\label{fig_2_5}QQ-plot of the random effects."}
+qqplot.data(dat_TMB$re)
+```
+
+The statistics and the visual representation of the random effects seem to fulfill the properties of Gaussianity.
+
+### Q2.3.3 Check the accuracy of the Laplace approximation by importance sampling
+<!---
+WHY:
+
+lots of approximations.. 
+There is a inaccuracy .. integral vs. laplae transformation..
+
+close to the true interval..
+
+simulate from a distribution -> estimate of the interval
+-->
+
+The two main functions of the importance sampling are listed in the code chunk below. The `nll()`-function is the negative log-likelihood function for (\ref{eq_2_1}). This function is used in the simulation process (`nll_Laplace_simulate()`-function) of the importance sampling\footnote{Inspired by R-script from lecture 10.}. 
+
+```{r, echo=TRUE}
+# negative log-likelihood function
+nll <- function(u, beta, X, sigma.u){
+  eta <- X %*% beta + u[dat$group]
+  # nll if fixed and random effects
+  lln_fix <- -sum(dpois(dat$y, lambda = exp(eta),log=TRUE))
+  lln_ran <- -sum(dnorm(u,sd=sigma.u,log=TRUE))
+  #
+  return(lln_fix + lln_ran)
+}
+# importance sampling
+nll_Laplace_simulate <- function(theta, X, k, seed){
+  set.seed(seed)
+  beta <- theta[-5]
+  sigma.u <- exp(theta[5]) #distribution of the U
+  est <- nlminb(rep(0, 30), objective = nll, #initial value=0
+                beta=beta, sigma.u=sigma.u, X=X)
+  u <- est$par
+  l.u <- est$objective #objective function = likelihood
+  H <- diag(hessian(nll,x=u, beta = beta, X=X, sigma.u=sigma.u))
+  s <- sqrt(1/H)
+  # do simulations
+  L <- sapply(1:k, function(i) {
+    u.sim <- rnorm(length(u), mean=u, sd=s)  
+    # return log-likelihood
+    return(exp(-nll(u=u.sim,beta=beta,sigma.u=sigma.u,X=X))/prod(dnorm(u.sim,mean=u,sd=s)))
+  })
+  # return average negative log-likelihood
+  return(list("nnl" = -log(mean(L)),"est"=est))
+}
+```
+
+It has been chosen to run `er k` simulations and then average the (negative) log-likelihood. The initial parameters of the simulation are estimated by the `glmmTMB()`-function.
+
+Table \ref{tb_2_4} reports the estimated negative log-likelihood and the simulated negative log-likelihood. 
+
+
+```{r}
+L <- nll_Laplace_simulate(fit_TMB$fit$par,X=model.matrix(fit_TMB),k=k,seed=22)
+data.frame(fit_TMB = fit_TMB$fit$objective,
+           `Laplace_simulation` = L$nnl) %>% 
+  knitr::kable(., caption = "\\label{tb_2_4}Check of the accuracy by importance sampling.")
+```
+
+\newpage
+
+## Q2.4
+### Q2.4.1 Write down the model
+
+The new hierarchical model with a gamma model in the second stage is given in (\ref{eq_2_3}).
+
+\begin{equation}
+\begin{aligned}
+Y_{ ij }\sim& \mathcal{P}\left( \eta_{ ij } \right)  \\
+\eta_{ ij } =&e^{X_{ ij }\beta + U_{ ij } }\\
+U_{ij} \sim& \Gamma \left(u_{ij},\,  k,\, \theta\right) =\Gamma \left(u_{ij},\,  k,\, \frac{1}{k}\right) 
+\end{aligned}
+\label{eq_2_3}
+\end{equation}
+where $u_{ij}$ is the random group effects (quantiles), $k$ and $\theta = \frac{1}{k}$ are the shape and scale parameter of the gamma distribution which all need to be estimated.
+
+### Q2.4.2 Estimate parameters and compare with the result in Question 3
+Two new functions of the negative log-likelihood (`nll_ga()`) and Laplace approximation (`nll_LA_ga()`) has been derived according to (\ref{eq_2_3}). The output below shows the implementation of these:
+
+```{r, echo=TRUE}
+# Negative log-likelihood function
+nll_ga <- function(u, beta, X, k){
+  # log(U) see example 6.6 on page 242
+  eta <- X%*%beta + log(u[dat$group])
+  # nll if fixed and random effects
+  lln_fix <- -sum(dpois(dat$y,lambda = exp(eta),log=TRUE))
+  lln_ran <- -sum(dgamma(u, shape = k, scale = 1/k ,log=TRUE))
+  #
+  return(lln_fix + lln_ran)
+}
+# Laplace approximation
+nll_LA_ga <- function(theta, X){
+  beta <- theta[-5]
+  k <- exp(theta[5]) # distribution of the U
+  est <- nlminb(rep(0.5, 30), objective = nll_ga, beta=beta, k=k, X=X, lower = 0.00000001)
+  u <- est$par
+  l.u <- est$objective
+  H <- hessian(func = nll_ga, x = u, beta = beta, k = k, X=X)
+  # return log-likelihood
+  return(l.u + 0.5 * log(det(H/(2*pi))))
+}
+```
+
+An optimization of the negative log-likelihood has been done by optimizing the Laplace approximation.  
+```{r}
+fit_LA_ga <- nlminb(rnorm(5), nll_LA_ga, X=model.matrix(fit_TMB))
+# fit_LA_ga <- optim(rep(0, 5), nll_LA_ga, X=model.matrix(fit_TMB))
+coef_Q4 <- round(c(fit_LA_ga$par[-5], exp(fit_LA_ga$par[5])), 4)
+#coef_Q4[5] <- round(, 4)
+```
+The estimated parameters are given in (\ref{eq_2_4}) and in table \ref{tb_2_5}.
+
+\begin{equation}
+\begin{aligned}
+Y_{ ij }\sim& \mathcal{P}\left( \eta_{ ij } \right)  \\
+\eta_{ ij } =&e^{X_{ ij }\cdot `r paste0("\\begin{bmatrix}", paste(coef_Q4[-5], collapse = "\\\\"), "\\end{bmatrix}")` +U_{ ij } }\\
+U_{ij} \sim& \Gamma \left(u_{ij},\,  `r coef_Q4[5]`,\, `r 1 / coef_Q4[5]` \right) 
+\end{aligned}
+\label{eq_2_4}
+\end{equation}
+
+```{r}
+data.frame(Parameters = c("(Intercept)","x1","x2","x1:x2", "theta/k"),
+           fit_TMB = coef_Q3, fit_LA_ga = coef_Q4) %>% 
+  mutate(delta = fit_LA_ga-fit_TMB) %>% 
+  knitr::kable(., caption = "\\label{tb_2_5}Comparison of parameter estimates by the glmmTMB method and the Laplace approximation metod.")
+```
+
+The estimated first stage parameters in the Poisson Gamma model (\ref{eq_2_4}) are quite similar to the parameters in the Poisson normal model (\ref{eq_2_4}).
+The `theta`-parameter and the `k`-parameter are not comparable to each other due to their different assumption of distribution.
+
+
+```{r, eval=FALSE}
+H <- hessian(nll_LA_ga,fit_LA_ga$par, X=model.matrix(fit_TMB))
+SE <- sqrt(diag(solve(H)))
+data.frame(par = fit_explicit$par, se = SE, ci_l = fit_explicit$par - 2 * SE,
+             ci_h = fit_explicit$par + 2 * SE) %>% 
+  knitr::kable(., caption = "\\label{tb_2_611}")
+```
+
+
+### Q2.4.3 Check the accuracy of the Laplace approximation by importance sampling
+The `nll_Laplace_simulate_ga()`-function creates `r k` simulations in order to check the accuracy of the Laplace approximation. The code chunk below shows the implementation.
+```{r, echo=TRUE}
+# importance sampling
+nll_Laplace_simulate_ga <- function(theta, X, n, seed){
+  set.seed(seed)
+  beta <- theta[-5]
+  k <- exp(theta[5]) # distribution of the U
+  est <- nlminb(rep(0.5, 30), objective = nll_ga, beta=beta, k=k, X=X, lower = 0.00000001)
+  u <- est$par
+  l.u <- est$objective
+  H <- diag(hessian(nll_ga,x=u, beta = beta, X=X, k=k))
+  s <- sqrt(1/H)
+  # do simulations
+  L <- sapply(1:n, function(i) {
+    u.sim <- rnorm(length(u), mean=u, sd=s)  
+    # return log-likelihood
+    return(exp(-nll_ga(u=u.sim,beta=beta,k=k,X=X))/prod(dnorm(u.sim,mean=u,sd=s)))
+  })
+  # return average negative log-likelihood
+   return(list("nnl" = -log(mean(L)),"est"=est))
+}
+```
+
+Table \ref{tb_2_4} reports the estimated and simulated negative log-likelihood for each of the two models. 
+
+```{r}
+L_ga <- nll_Laplace_simulate_ga(fit_LA_ga$par,X=model.matrix(fit_TMB),n=k,seed=22)
+#
+data.frame(fit_TMB = fit_TMB$fit$objective,
+           LA_sim = L$nnl,
+           fit_LA_ga = fit_LA_ga$objective,
+           LA_ga_sim = L_ga$nnl) %>% 
+  knitr::kable(., caption = "\\label{tb_2_5}Check of the accuracy.")
+```
+
+Both models obtain approximately the same negative log-likelihood. The average values of the simulations are just below the estimated values of each of the models. These offsets make intuitively sense since the importance sampling samples within the interval of the estimated maximum.
+
+
+
+## Q2.5
+### Q2.5.1 Find the explicit formulation of the likelihood 
+The explicit formulation of the likelihood is given in (\ref{eq_2_6}). The derivation of the formulation is heavily inspired by the example from slide 13 in lecture 12.
+
+\begin{equation}
+\begin{aligned}
+g_{Y}\left(y\right)&=\int_{0}^{\infty}\prod^{j}\left(\frac{\mu_{i}^{y_{ij}}}{y_{ij}!}e^{-\mu_{i}}\right)\frac{1}{k^{\alpha}\Gamma\left(\alpha\right)}\mu_i^{\alpha-1}e^{-\frac{\mu_i}{k}}du_i\\
+&=\int_{0}^{\infty}\prod^{j}\left(\frac{\left[e^{X_{ij}\beta}e^{\mu_{i}}\right]^{y_{ij}}}{y_{ij}!}e^{-\left[e^{X_{ij}\beta}e^{\mu_{i}}\right]}\right)\frac{1}{k^{\frac{1}{k}}\Gamma\left(\frac{1}{k}\right)}v^{\frac{1}{k}-1}e^{-\frac{v}{k}}dv\\
+&=\int_0^\infty\prod^{j}
+\left(\frac{e^{\left(X_{ij}\beta\right)^{y_{ij}}}e^{\mu_{i}^{y_{ij}}}e^{-v\left(e^{X_{ij}\beta}\right)}}{y_{ij}!}\right)\frac{1}{k^{\frac{1}{k}}\Gamma\left(\frac{1}{k}\right)}v^{\frac{1}{k}-1}e^{-\frac{v}{k}}dv\\
+%&=\int_0^\infty\frac{1}{y_{ij}!}e^{\sum^j\left(X_{ij}\beta\right)^{y_{ij}}}v^{\sum^jy_{ij}}e^{-v\sum^j\lambda_{ij}}\frac{1}{k^{\frac{1}{k}}\Gamma\left(\frac{1}{k}\right)}v^{\frac{1}{k}-1}e^{-\frac{v}{k}}dv\\
+&=\prod^{j}{\frac{\lambda_{ij}^{y_{ij}}}{y_{ij}!}}\frac{1}{k^{\frac{1}{k}}\Gamma\left(\frac{1}{k}\right)}\int_{0}^{\infty}v^{\sum^{j}y_{ij}}e^{-v\sum^{j}\lambda_{ij}}v^{\frac{1}{k}-1}e^{-\frac{v}{k}}dv\\
+%Seslide13inlecture12
+&=\prod^{j}{\frac{\lambda_{ij}^{y_{ij}}}{y_{ij}!}}\frac{1}{k^{\frac{1}{k}}\Gamma\left(\frac{1}{k}\right)}\int_{0}^{\infty}v^{\overbrace{\sum^jy_{ij}+\frac{1}{k}}^{\tilde{\alpha}}-1}e^{-v\overbrace{\left(\sum^j\lambda_{ij}+\frac{1}{k}\right)}^{\frac{1}{\tilde{\beta}}}}dv\\
+%Removeintegral
+&=\prod^{j}{\frac{\lambda_{ij}^{y_{ij}}}{y_{ij}!}}\frac{1}{k^{\frac{1}{k}}\Gamma\left(\frac{1}{k}\right)}\Gamma\left(\sum^jy_{ij}+\frac{1}{k}\right)\left(\frac{k}{k\sum^j\lambda_{ij}+1}\right)^{\sum^jy_{ij}+\frac{1}{k}}\\
+%Reduction
+&=\prod^{j}{\frac{\lambda_{ij}^{y_{ij}}}{y_{ij}!}}\frac{1}{k^{\frac{1}{k}}}\frac{\Gamma\left(\sum^jy_{ij}+\frac{1}{k}\right)}{\Gamma\left(\frac{1}{k}\right)}\left(\frac{k}{k\sum^j\lambda_{ij}+1}\right)^{\sum^jy_{ij}+\frac{1}{k}}
+\end{aligned}
+\label{eq_2_6}
+\end{equation}
+
+where $\lambda_{ij}=e^{X_{ij}\beta}$. $\tilde { \alpha }$ and $\frac{1}{\tilde { \beta}}$ are recognized as the $\Gamma$-integral\footnote{Slide 13 from lecture 12.}. It is hereby possible to get an analytic solution of the formulation.
+
+The $k$-parameter and the $\beta$'s are parameters which need to be estimated w.r.t. maximizing the negative (log-)likelihood of (\ref{eq_2_6}).
+
+
+### Q2.5.2 Implement the above formulation and estimate the parameters.
+
+The final line of (\ref{eq_2_6}) is showed in (\ref{eq_2_7}). (\ref{eq_2_7}) has been split into three terms and two constants defined as $c_1$ and $c_2$ which are independent of each of the groups. These constants and the complete $\lambda_{ij}$ are defined outside the loop in order to gain computational efficiency.
+
+\begin{equation}
+\begin{aligned}
+\underbrace{\prod^{j}{\frac{\lambda_{ij}^{y_{ij}}}{y_{ij}!}}}_{term_{1}}\underbrace{\overbrace{\frac{1}{k^{\frac{1}{k}}}}^{c_{1}}\frac{\Gamma\left(\sum^{j}y_{ij}+\frac{1}{k}\right)}{\overbrace{\Gamma\left(\frac{1}{k}\right)}^{c_{2}}}}_{term_{2}}\underbrace{\left(\frac{k}{k\sum^{j}\lambda_{ij}+1}\right)^{\sum^{j}y_{ij}+\frac{1}{k}}}_{term_{3}}
+\end{aligned}
+\label{eq_2_7}
+\end{equation}
+
+The three terms of (\ref{eq_2_7}) only represents the likelihood and must therefore be log-transformed prior to the optimization procedure. 
+
+**NB:** It has to be notified that the response of the observations must not be zero. This will result in a zero in the first term which entails `log(0*t2*t3) = log(0) = -Inf` hence the extra condition when founding the indices for a given group.
+
+The implementation of (\ref{eq_2_7}) is showed in the code chunk below.
+
+```{r, echo=TRUE}
+# Negative log-likelihood function
+nll_explicit <- function(theta, X, Y){
+  # constants
+  beta <- theta[-5]
+  k <- exp(theta[5])
+  c_1 <- 1 / (k^(1/k))
+  c_2 <- lgamma(1/k)
+  lambda_ij <- exp(X%*%beta)
+  # calculate log-likelihood for each group
+  opt_val_single <- sapply(1:30, function(ii) {
+    # get idx and subset lambda and Y for given group
+    idx <- ii == dat$group & dat$y != 0
+    lambda_single <- lambda_ij[idx]
+    Y_single <- Y[idx]
+    # term 1
+    t1 <- prod(lambda_single^Y_single / prod(Y_single))
+    # term 2
+    t2 <- c_1 * lgamma(sum(Y_single)+1/k) / c_2
+    # term 3
+    t3 <- (k/(k*sum(lambda_single)+1))^(sum(Y_single)+1/k)
+    #
+    return(log(t1*t2*t3))
+  })
+  # return negative log-likelihood
+  return(-sum(opt_val_single))
+}
+```
+
+
+```{r}
+#
+fit_explicit <- nlminb(rep(0.5,5), nll_explicit, X = model.matrix(fit_glm), Y = dat$y)
+#
+coef_Q5 <- round(c(fit_explicit$par[-5], exp(fit_explicit$par[5])), 4)
+# 3 constants
+c_1 <- round(1 / (exp(fit_explicit$par[5])^(1/exp(fit_explicit$par[5]))),4)
+c_2 <- round(lgamma(1/exp(fit_explicit$par[5])),4)
+c_3 <- round(1/exp(fit_explicit$par[5]),4)
+```
+
+The estimated parameters are given in (\ref{eq_2_8}) and in table \ref{tb_2_6}. The estimated log-likelihood is: $`r round(fit_explicit[["objective"]],4)`$ which much larger compared to the previous estimated models: $`r round(-as.vector(logLik(fit_glm)),4)`$, $`r round(fit_TMB_obj,4)`$ and $`r round(fit_LA_ga[["objective"]],4)`$ for the `fit_glm()`-function, the `fit_TMB()`-function and the `fit_LA_ga()`-function respectively.
+
+```{r, eval=FALSE}
+H < -hessian(nll_explicit, fit_explicit$par, X = model.matrix(fit_glm), Y = dat$y)
+SE <- sqrt(diag(solve(H)))
+data.frame(par = fit_explicit$par, se = SE, ci_l = fit_explicit$par - 2 * SE,
+             ci_h = fit_explicit$par + 2 * SE) %>% 
+  knitr::kable(., caption = "\\label{tb_2_611}")
+```
+
+The parameters in the explicit formulation are similar to the previous estimated models thus the large difference in the estimated log-likelihood the third model, see (\ref{eq_2_8}) and table \ref{tb_2_6}.
+
+```{r}
+data.frame(Parameters = c("(Intercept)","x1","x2","x1:x2", "theta/k"),
+           fit_TMB = coef_Q3, fit_LA_ga = coef_Q4, fit_explicit = coef_Q5) %>% 
+  #mutate(delta = fit_LA_ga-fit_TMB) %>% 
+  knitr::kable(., caption = "\\label{tb_2_6}Comparison of parameter estimates by the glmmTMB method, the Laplace approximation metod and the explicit formulation.")
+```
+
+
+\begin{subequations}
+\begin{equation}
+\begin{aligned}
+g_{Y}\left(y\right)&=\prod^{j}\frac{\lambda_{ij}^{y_{ij}}}{y_{ij}!}`r c_1`\frac{\Gamma\left(\sum^{j}y_{ij}+`r c_3`\right)}{`r c_2`}\left(\frac{`r round(coef_Q5[5],4)`}{`r round(coef_Q5[5],4)`\sum^{j}\lambda_{ij}+1}\right)^{\sum^{j}y_{ij}+`r c_3`} \\
+\end{aligned}
+\label{eq_2_8_A}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\lambda_{ij}&=e^{X_{ij}\cdot `r paste0("\\begin{bmatrix}", paste(coef_Q5[-5], collapse = "\\\\"), "\\end{bmatrix}")`}
+\end{aligned}
+\label{eq_2_8_B}
+\end{equation}
+\label{eq_2_8}
+\end{subequations}
+
+
+
+### Q2.5.3 Find the conditional mean and variance of the random effects 
+
+<!--
+(Hint: see (the proof of) Theorem 6.2)
+-->
+
+The question has not been considered due to lack of time.
+<!--
+```{r, eval=FALSE}
+X = model.matrix(fit_glm)
+## Unconditional mean and precision
+mu <- 1 / (1 + exp(-(X%*%coef_Q5[-5])))
+phi <- exp(coef_Q5[5])
+#
+alpha <- mu * phi
+beta <- (1-mu) * phi
+
+View(cbind(alpha, ))
+
+## Conditional mean and precision (Theorem 6.6)
+alpha.z <- alpha + r
+beta.z <- beta + n - r
+
+
+dgamma(u, shape = k, scale = 1/k ,log=TRUE)
+
+dat$y - ((1/coef_Q5[5] + dat$y) / ( 1/coef_Q5[5] + 1 ))
+
+
+
+mu.z <- alpha.z/(alpha.z+beta.z)
+sigma.z <- alpha.z+beta.z
+```
+
+\begin{equation}
+\begin{aligned}
+1
+\end{aligned}
+\label{eq_2_9}
+\end{equation}
+
+-->
+
+## Q2.6
+<!--
+Compare and discuss the models and estimation methods you have used in this problem, e.g. which method/model would you prefer, how difficult is it to generalize the results to more complicated structures, etc.
+-->
+
+There has been applied three different models and four different methods. These are listed below and will be referenced as e.g. `[4]` for explicit formulation.
+
+1. A Poisson GLM using a `log`-link function.
+1. `glmmTMB()`-function of the hierarchical Poisson-Normal model.
+1. Laplace approximation of the hierarchical Poisson-Gamma model.
+1. Explicit formulation of the likelihood of the hierarchical Poisson-Gamma model.
+
+A statistical analysis of the level of significance of the grouping effect in model `[2]`, model `[3]` and model `[4]` has not been carried out, however the grouping structure is stated in the exploratory analysis. It is therefore not possible to reject model `[1]` because it does not consider this grouping effect.
+
+The first stage parameters in model `[2]`, model `[3]` and model `[4]` are similar despite the different estimated methods. 
+The distribution assumption of the second stage in model `[2]` is Gaussian where the second stage of model `[3]` and model `[4]` are Gamma distributions with a mean of `1`. The estimated grouping effects of model `[2]` supports the distribution assumption, see table \ref{tb_2_3}, figure \ref{fig_2_3} and \ref{fig_2_5}. An analysis regarding whether the grouping effects follows the Gamma distribution has not been carried out. This needs to be analysed prior to rejecting or accepting model `[3]` and model `[4]`.
+
+The preferred choice of method would be model `[2]` due to its simple notation, minimized possible coding errors and efficient computational framework. By choosing either model `[3]` or model `[4]` a more complicated implementation will be introduced. This can increase the amount of possible coding errors in the implementation. 
+
+<!--
+The double optimization procedure in model `[3]` is computation heavy and can potentinal enter local maxima and return sub-optimal parameter estimates. 
+-->
