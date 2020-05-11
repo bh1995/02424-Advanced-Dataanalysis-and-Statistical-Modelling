@@ -3,7 +3,7 @@
 ##################################################################
 
 ## Import data
-setwd("C:/Users/Bjorn/OneDrive/Dokument/University/DTU/02424 Advanced Dataanalysis and Statistical Modelling/labs/02424-Advanced-Dataanalysis-and-Statistical-Modelling/Assignment3")
+setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/02424-Advanced-Dataanalysis-and-Statistical-Modelling/Assignment3")
 data <- read.table("concrets.csv", sep = "",  header = TRUE)
 dim(data)
 head(data)
@@ -14,7 +14,7 @@ data
 ## Problem 1B
 library(reshape)
 library(lme4)
-data1 <- melt(data[, c("date", "y7", "y28", "batch", "air_temp")], measure.vars = c("y7", "y28"))
+data1 <- melt(data[, c("date", "y7", "y28", "batch", "air.temp")], measure.vars = c("y7", "y28"))
 head(data1)
 str(data1)
 
@@ -24,168 +24,124 @@ data2 <- within(data1, {
 })
 str(data2)
 
-model <- lmer(value ~ 0 + y7 + y7:air_temp + y28 + y28:air_temp + (1 | batch), data = data2)
+model <- lmer(value ~ 0 + y7 + y7:air.temp + y28 + y28:air.temp + (1 | batch), data = data2)
 summary(model)
 plot(model)
 confint(model)
 
-diagnos <- data.frame(Resid = resid(model, type = "pearson"), Fitted = fitted(model), variable = data2$air_temp)
+diagnos <- data.frame(Resid = resid(model, type = "pearson"), Fitted = fitted(model), variable = data2$air.temp)
 plot(diagnos)
 
 ## Problem 2A - Done
 
 ## Problem 2B
 library(glmmTMB)
-#setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/Assignments/Assignment\ 3")
-setwd("C:/Users/Bjorn/OneDrive/Dokument/University/DTU/02424 Advanced Dataanalysis and Statistical Modelling/labs/02424-Advanced-Dataanalysis-and-Statistical-Modelling/Assignment3")
+setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/Assignments/Assignment\ 3")
 data <- read.table("dat_count3.csv", sep = ";",  header = TRUE)
 dim(data)
 head(data)
-plot(clo~log(nobs),data=data,col=subjId,pch=19)
+plot(clo~subjId,data=data,col=sex,pch=19)
 
-fit_TMB <- glmmTMB(formula = clo ~ log(nobs)  + (1|subjId), family=poisson(link = "log"), data=data) # Better option to use the previous "fit_poi" model.
+##################################################
+## TMB Poisson
+fit_TMB <- glmmTMB(formula = clo ~ sex  + (1|subjId), family=poisson(link = "log"), data=data)
 fit_TMB$fit$par
-summary(fit_TMB)
-fit_poi = glmmTMB(clo ~ sex + (1|subjId), family=poisson, data=data)
 
-1 - pchisq(270.4, 133)
-
+##################################################
 ## Implementation of a mixed effect model
-dat <- data.frame(subjId=data$subjId, clo=data$clo, logobs=log(data$nobs), sex=data$sex)
-X <- matrix(0,ncol=2,nrow=dim(dat)[1]);X
-X[ ,1]<-1;X
-X[ ,2]<-dat$sex;X 
+dat <- data.frame(subjId=data$subjId, clo=data$clo, sex=data$sex, time=data$time)
+dat$subjId <- as.factor(dat$subjId)
+X <- matrix(0,ncol=2,nrow=dim(dat)[1])
+X[ ,1]<-1
+X[dat$sex == 'female',2] = 0
+X[dat$sex == 'male',2] = 1
+X
 
 library(numDeriv)
-
+##################################################
 # Negative log-likelihood function
-nll_ga <- function(u, beta, X, k){
-  eta <- X%*%beta 
-  # nll if fixed and random effects
-  lln_fix <- -sum(dpois(dat$clo,lambda = exp(eta)*u[dat$subjId], log=TRUE))
-  lln_ran <- -sum(dgamma(u, shape = k, scale = 1/k , log=TRUE))
-  #
-  return(lln_fix + lln_ran)
-}
-# Laplace approximation
-nll_LA_ga <- function(theta, X){
-  beta <- theta[1:dim(X)[2]]
-  k <- exp(theta[dim(X)[2]+1])
-  est <- nlminb(rep(1, length(unique(dat$subjId))), objective = nll_ga, beta=beta, k=k, X=X, lower = 0.00000001)
-  u <- est$par
-  l.u <- est$objective
-  H <- hessian(func = nll_ga, x = u, beta = beta, k = k, X=X)
-  # return log-likelihood
-  return(l.u + 0.5 * log(det(H/(2*pi))))
+nll <- function(u, beta, X, k){
+  ## An offset "log(dat$time)" is added to the Poisson distribution
+  eta <- X%*%beta + log(dat$time)
+  U <- u[dat$subjId]
+  lambda <- exp(eta)*U
+  return(-sum(dpois(dat$clo, lambda = lambda, log = TRUE))-sum(dgamma(u, shape = k, scale = 1/k, log = TRUE)))
 }
 
-fit_LA_ga <- nlminb(start_val, nll_LA_ga, X=model.matrix(fit_TMB))
-coef_Q4 <- round(c(fit_LA_ga$par[-3], exp(fit_LA_ga$par[3])), 4)
-c(coef_Q4, fit_TMB$fit$par)
-
-# improve by using independence of u's in nlminb
-# Laplace approximation
-nll_LA_ga <- function(theta, X){
+##################################################
+## Improve by using independence of u's in nlminb
+nll.LA3 <- function(theta,X){
   beta <- theta[1:dim(X)[2]]
-  #beta <- theta[3]
-  k <- exp(theta[dim(X)[2]+1])
-  u <- numeric(length(unique(dat$subjId)))
-  
-  for(i in 1:length(u)){
-    u[i] <- nlminb(1, objective=nll_ga, beta=beta, k=k, X=X, lower=0.00000001)$par
+  sigma.u <- exp(theta[dim(X)[2]+1])
+  ## Do for 1 of the random effects
+  fun.tmp <- function(ui,u,beta,sigma.u,X,i){
+    u <- rep(1,length(u))
+    u[i]<-ui
+    #print(i)
+    nll(u,beta,X,sigma.u)
   }
-  l.u <- nll_ga(u, beta, X, k)
+  u <- numeric(length(levels(dat$subjId))) + 1
+  ## Use grouping structure (10 1D optimization)
+  for(i in 1:length(u)){
+      u[i] <- nlminb(1,objective = fun.tmp, u=u, beta=beta, sigma.u=sigma.u,X=X,i=i,lower = 0.00000001)$par
+  }
+  l.u <- nll(u,beta,X,sigma.u)
   H <- numeric(length(u))
-  
+  ## Calculate the Hessian by considering only the diagonal elements
   for(i in 1:length(u)){
-    H[i] <- hessian(func = nll_ga, x = u[i], u=u, beta = beta, X=X)
+      H[i] <- hessian(func = fun.tmp, x = u[i],u=u, beta = beta, sigma.u = sigma.u, X=X,i=i)
   }
-return(l.u + 0.5 * log(prod(H/(2*pi))))
+  l.u + 0.5 * log(prod(H/(2*pi)))
 }
 
-start_val = c(-3.8072716, 1.8390356, -0.1675707 ) 
-#nll_LA_ga(start_val, X=model.matrix(fit_TMB)) # for the optimization to work the returned hessian must be positive definite, which means if this does not give back a value there is something wrong with nll_LA_ga.
-fit_LA_ga <- nlminb(start_val, nll_LA_ga, X=model.matrix(fit_TMB))
-coef_Q4 <- round(c(fit_LA_ga$par[-3], exp(fit_LA_ga$par[3])), 4)
-c(coef_Q4, fit_TMB$fit$par)
-
-fit_LA_ga$iterations
--fit_LA_ga$objective
+system.time(fit2 <- nlminb(c(-2,-1,1), nll.LA3, X=X))
+## TMB against Laplance approximation
+-fit2$objective
 logLik(fit_TMB)
-1-pchisq(2*(-fit_LA_ga$objective-logLik(fit_TMB)),df=1)
-## Hence a significant improvement
+## TMB against Laplance approximation
+fit2$par
+fit_TMB$fit$par
 
-# Importance sampling
-nll_Laplace_simulate_ga <- function(theta, X, n, seed){
-  set.seed(seed)
+##################################################
+## Importance sampling
+nll_Laplace_simulate <- function(theta,X,k,seed){
   beta <- theta[1:dim(X)[2]]
-  #beta <- theta[-3]
-  k <- exp(theta[dim(X)[2]+1])
-  #k <- exp(theta[3]) # distribution of the U
-  est <- nlminb(rep(1,length(unique(dat$subjId))), objective = nll_ga, beta=beta, k=k, X=X, lower = 0.00000001)
-  u <- est$par
-  l.u <- est$objective
-  H <- diag(hessian(nll_ga,x=u, beta = beta, X=X, k=k))
+  sigma.u <- exp(theta[dim(X)[2]+1])
+  ## Do for 1 of the random effects
+  fun.tmp <- function(ui,u,beta,sigma.u,X,i){
+    u <- rep(1,length(u))
+    u[i]<-ui
+    print(i)
+    nll(u,beta,X,sigma.u)
+  }
+  u <- numeric(length(levels(dat$subjId))) + 1
+  ## Use grouping structure (10 1D optimization)
+  for(i in 1:length(u)){
+    u[i] <- nlminb(1,objective = fun.tmp, u=u, beta=beta, sigma.u=sigma.u,X=X,i=i,lower = 0.00000001)$par
+  }
+  est <- u
+  l.u <- nll(u,beta,X,sigma.u)
+  H <- numeric(length(u))
   s <- sqrt(1/H)
-  # do simulations
-  L <- sapply(1:n, function(i) {
-    u.sim <- rnorm(length(u), mean=u, sd=s)  
-    # return log-likelihood
-    return(exp(-nll_ga(u=u.sim,beta=beta,k=k,X=X))/prod(dnorm(u.sim,mean=u,sd=s)))
-  })
+  ## Calculate the Hessian by considering only the diagonal elements
+  for(i in 1:length(u)){
+    H[i] <- hessian(func = fun.tmp, x = u[i],u=u, beta = beta, sigma.u = sigma.u, X=X,i=i)
+  }
+  ## Simpulations
+  L <- 0
+  for(i in 1:k) {
+    u.sim <- rgamma(length(u), shape = sigma.u, scale = 1/sigma.u)  
+    L[i] <- exp(-nll(u=u.sim,beta=beta,X=X,k=sigma.u)) / prod(dgamma(u.sim, shape = sigma.u, scale = 1/sigma.u))
+  }
   # return average negative log-likelihood
   return(list("nnl" = -log(mean(L)),"est"=est))
 }
-L_ga <- nll_Laplace_simulate_ga(fit_LA_ga$par, X=model.matrix(fit_TMB), n=k, seed=22)
-L_ga$est$objective
-L_ga$nnl
+
+k <- 10000
+L <- nll_Laplace_simulate(fit2$par,X=X,k=k,seed=22)
+c(L,fit2$objective)
+
+fit2$objective
+L$nnl
 
 
-# Importance sampling using independent u's
-nll_Laplace_simulate_ga <- function(theta, X, n, seed){
-  set.seed(seed)
-  beta <- theta[1:dim(X)[2]]
-  #beta <- theta[-3]
-  k <- exp(theta[dim(X)[2]+1])
-  #beta <- theta[3]
-  u <- numeric(length(unique(dat$subjId)))
-  #k <- exp(theta[-3])
-  #u <- est$par
-  #l.u <- est$objective
-  #est <- nlminb(rep(1,length(unique(dat$subjId))), objective = nll_ga, beta=beta, k=k, X=X, lower = 0.00000001)
-  ## Use grouping structure
-  for(i in 1:length(u)){
-    u[i] <- nlminb(0, objective=nll_ga, beta=beta, k=k, X=X, lower=0.00000001)$par
-  }
-  #H <- hessian(func = nll_ga, x = u, beta = beta, k = k, X=X)
-  # return log-likelihood
-  # return(l.u + 0.5 * log(det(H/(2*pi))))
-  #return(list("nnl" = -log(L),"est"=est))
-  l.u <- nll_ga(u, beta, X, k)
-  H <- numeric(length(u))
-  for(i in 1:length(u)){
-    H[i] <- hessian(func = nll_ga, x = u[i], u=u, beta = beta, X=X)
-  }
-  return(l.u + 0.5 * log(prod(H/(2*pi))))
-  #k <- exp(theta[3]) # distribution of the U
-  #est <- nlminb(rep(1,length(unique(dat$subjId))), objective = nll_ga, beta=beta, k=k, X=X, lower = 0.00000001)
-  #u <- est$par
-  u <- numeric(length(unique(dat$subjId)))
-  ## Use grouping structure
-  for(i in 1:length(u)){
-    u[i] <- nlminb(1, objective=nll_ga, u=u,beta=beta,  beta=beta, k=k, X=X, lower = 0.00000001)$par
-  }
-  #H <- diag(hessian(nll_ga,x=u, beta = beta, X=X, k=k))
-  s <- sqrt(1/H)
-  # do simulations
-  L <- sapply(1:n, function(i) {
-    u.sim <- rnorm(length(u$par), mean=u, sd=s)  
-    # return log-likelihood
-    return(exp(-nll_ga(u=u.sim,beta=beta,k=k,X=X))/prod(dnorm(u.sim,mean=u,sd=s)))
-  })
-  # return average negative log-likelihood
-  return(list("nnl" = -log(mean(L)),"est"=u))
-}
-L_ga <- nll_Laplace_simulate_ga(fit_LA_ga$par, X=model.matrix(fit_TMB), n=k, seed=22)
-L_ga$est$objective
-L_ga$nnl
