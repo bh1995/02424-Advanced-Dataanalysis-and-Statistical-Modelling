@@ -152,43 +152,35 @@ abline(h = L$nnl, col = "blue")
 legend(-400, -173.2, legend=c("Mean of log(L)", "Log of mean(L)"),
        col=c("red", "blue"), lty=1:1, cex=0.8)
 
+
+
 ##################################################
 ## Problem 2C 
 ##################################################
 # Negative log-likelihood function
-nll_explicit <- function(theta, X, Y){
+nll_problemC <- function(theta, X, Y){
   beta <- theta[1:dim(X)[2]]
-  k <- exp(theta[dim(X)[2]+1])
-  c_1 <- 1 / (k^(1/k))
-  c_2 <- lgamma(1/k)
-  lambda_ij <- exp(X%*%beta)
-  # calculate log-likelihood for each subjId
-  opt_val_single <- sapply(1:47, function(ii) {
-    # get idx and subset lambda and Y for given subjId
-    idx <- ii == dat$subjId & dat$clo != 0
-    lambda_single <- lambda_ij[idx]
-    Y_single <- Y[idx]
-    # term 1
-    t1 <- prod(lambda_single^Y_single / prod(Y_single))
-    # term 2
-    t2 <- c_1 * lgamma(sum(Y_single)+1/k) / c_2
-    # term 3
-    t3 <- (k/(k*sum(lambda_single)+1))^(sum(Y_single)+1/k)
-    #
-    return(log(t1*t2*t3))
+  sigma.u <- exp(theta[dim(X)[2]+1])
+  u <- numeric(length(levels(dat$subjId))) + 1
+  lambda_ij <- exp(X%*%beta)*u[dat$subjId]
+  # log-likelihood for each subjId (47 in total)
+  ll_single <- sapply(1:length(u), function(i) {
+    part1 <- prod(lambda_ij[i]^Y[i] / prod(Y[i]))
+    part2 <- (1 / (sigma.u^(1/sigma.u))) * lgamma(sum(Y[i])+1/sigma.u) / lgamma(1/sigma.u)
+    part3 <- (1/(sum(lambda_ij[i])+1))^(sum(Y[i])+1/sigma.u)
+    print(log(part1*part2*part3))
+    return(log(part1*part2*part3))
   })
-  # return negative log-likelihood
-  return(-sum(opt_val_single))
+  return(-sum(ll_single))
 }
 
-fit_explicit <- nlminb(fit2$par, nll_explicit, X=X, Y=dat$clo)
-fit_explicit$par
+fit3 <- nlminb(fit2$par, nll_problemC, X=X, Y=dat$clo)
+fit3$par
+fit3$iterations
+fit3$objective
 
-fit_explicit$objective
 fit2$par
 fit_TMB$fit$par
-
-
 
 
 
