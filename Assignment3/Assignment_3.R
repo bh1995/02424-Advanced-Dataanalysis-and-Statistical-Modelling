@@ -34,7 +34,7 @@ plot(diagnos)
 
 ## Problem 2A - Done
 
-## Problem 2B
+## Problem 2B - Done
 library(glmmTMB)
 setwd("~/Desktop/DTU/Advanced\ Dataanalysis\ and\ Statistical\ Modelling/Assignments/Assignment\ 3")
 data <- read.table("dat_count3.csv", sep = ";",  header = TRUE)
@@ -44,7 +44,7 @@ plot(clo~subjId,data=data,col=sex,pch=19)
 
 ##################################################
 ## TMB Poisson
-fit_TMB <- glmmTMB(formula = clo ~ sex  + (1|subjId), family=poisson(link = "log"), data=data)
+fit_TMB <- glmmTMB(formula = clo ~ offset(log(time)) + sex  + (1|subjId), family=poisson(link = "log"), data=data)
 fit_TMB$fit$par
 
 ##################################################
@@ -134,14 +134,64 @@ nll_Laplace_simulate <- function(theta,X,k,seed){
     L[i] <- exp(-nll(u=u.sim,beta=beta,X=X,k=sigma.u)) / prod(dgamma(u.sim, shape = sigma.u, scale = 1/sigma.u))
   }
   # return average negative log-likelihood
-  return(list("nnl" = -log(mean(L)),"est"=est))
+  return(list("nnl" = log(mean(L)),"est"=est,"logL"=log(L)))
 }
 
 k <- 10000
 L <- nll_Laplace_simulate(fit2$par,X=X,k=k,seed=22)
-c(L,fit2$objective)
+# Overall negative log-likelihood across methods
+c(L$nnl,-fit2$objective,logLik(fit_TMB))
 
-fit2$objective
-L$nnl
+##################################################
+## Plot L over the number of iterations
+plot(c(1:k),L$logL, main = "Negative log-likelihood over simulations", 
+     xlab = "Simulations", ylab = "Negative log-likelihood")
+abline(h = mean(L$logL), col = "red")
+abline(h = L$nnl, col = "blue")
+# Add a legend
+legend(-400, -173.2, legend=c("Mean of log(L)", "Log of mean(L)"),
+       col=c("red", "blue"), lty=1:1, cex=0.8)
+
+##################################################
+## Problem 2C 
+##################################################
+# Negative log-likelihood function
+nll_explicit <- function(theta, X, Y){
+  beta <- theta[1:dim(X)[2]]
+  k <- exp(theta[dim(X)[2]+1])
+  c_1 <- 1 / (k^(1/k))
+  c_2 <- lgamma(1/k)
+  lambda_ij <- exp(X%*%beta)
+  # calculate log-likelihood for each subjId
+  opt_val_single <- sapply(1:47, function(ii) {
+    # get idx and subset lambda and Y for given subjId
+    idx <- ii == dat$subjId & dat$clo != 0
+    lambda_single <- lambda_ij[idx]
+    Y_single <- Y[idx]
+    # term 1
+    t1 <- prod(lambda_single^Y_single / prod(Y_single))
+    # term 2
+    t2 <- c_1 * lgamma(sum(Y_single)+1/k) / c_2
+    # term 3
+    t3 <- (k/(k*sum(lambda_single)+1))^(sum(Y_single)+1/k)
+    #
+    return(log(t1*t2*t3))
+  })
+  # return negative log-likelihood
+  return(-sum(opt_val_single))
+}
+
+fit_explicit <- nlminb(fit2$par, nll_explicit, X=X, Y=dat$clo)
+fit_explicit$par
+
+fit_explicit$objective
+fit2$par
+fit_TMB$fit$par
+
+
+
+
+
+
 
 
